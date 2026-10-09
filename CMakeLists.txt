@@ -22,6 +22,13 @@ target_include_directories(rsvp_playback PUBLIC
 )
 target_link_libraries(rsvp_playback PUBLIC rsvp_text)
 
+add_library(rsvp_storage
+    components/storage/src/state_store.cpp
+)
+target_include_directories(rsvp_storage PUBLIC
+    components/storage/include
+)
+
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
@@ -32,6 +39,6 @@ if(BUILD_TESTING)
     add_executable(rsvp_core_tests
         tests/core_tests.cpp
     )
-    target_link_libraries(rsvp_core_tests PRIVATE rsvp_playback)
+    target_link_libraries(rsvp_core_tests PRIVATE rsvp_playback rsvp_storage)
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
 endif()

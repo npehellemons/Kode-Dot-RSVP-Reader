@@ -1,8 +1,11 @@
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
+#include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -15,6 +18,21 @@ using rsvp::playback::PlaybackState;
 using rsvp::playback::PunctuationPauseMode;
 using rsvp::playback::DisplayAdapter;
 using rsvp::playback::DisplayState;
+using rsvp::storage::BookmarkV1;
+using rsvp::storage::FixationMode;
+using rsvp::storage::PunctuationMode;
+using rsvp::storage::SettingsV1;
+using rsvp::storage::content_hash;
+using rsvp::storage::load_bookmark;
+using rsvp::storage::load_settings;
+using rsvp::storage::parse_bookmark;
+using rsvp::storage::parse_hex_u64;
+using rsvp::storage::parse_settings;
+using rsvp::storage::save_bookmark_atomic;
+using rsvp::storage::save_settings_atomic;
+using rsvp::storage::serialize_bookmark;
+using rsvp::storage::serialize_settings;
+using rsvp::storage::to_hex;
 using rsvp::text::PunctuationFlags;
 using rsvp::text::has_flag;
 using rsvp::text::tokenize;
@@ -181,6 +199,89 @@ void test_wpm_bounds_and_punctuation_durations() {
     require(engine.duration_for_index(0) == 100, "punctuation off uses base duration");
 }
 
+std::filesystem::path temp_test_dir(const char* name) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     (std::string("kode-rsvp-") + name);
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+    std::filesystem::create_directories(dir, error);
+    require(!error, "temp directory created");
+    return dir;
+}
+
+void test_settings_serialization_and_atomic_load() {
+    SettingsV1 settings;
+    settings.wpm = 325;
+    settings.font_scale = 115;
+    settings.fixation_mode = FixationMode::orp;
+    settings.punctuation_mode = PunctuationMode::off;
+
+    const auto parsed = parse_settings(serialize_settings(settings));
+    require(parsed.has_value(), "settings round trip parses");
+    require(parsed->schema_version == SettingsV1::kSchemaVersion, "settings schema retained");
+    require(parsed->wpm == 325, "settings wpm round trip");
+    require(parsed->font_scale == 115, "settings font scale round trip");
+    require(parsed->fixation_mode == FixationMode::orp, "settings fixation round trip");
+    require(parsed->punctuation_mode == PunctuationMode::off,
+            "settings punctuation round trip");
+
+    const auto dir = temp_test_dir("settings");
+    const auto path = dir / "settings.state";
+    require(save_settings_atomic(path, settings), "settings atomic save succeeds");
+    const auto loaded = load_settings(path);
+    require(loaded.has_value(), "settings atomic load succeeds");
+    require(loaded->wpm == 325, "loaded settings wpm");
+    require(!std::filesystem::exists(path.string() + ".tmp"), "settings temp file removed");
+
+    {
+        std::ofstream corrupt(path, std::ios::binary | std::ios::trunc);
+        corrupt << "schema_version=99\nwpm=325\n";
+    }
+    require(!load_settings(path).has_value(), "corrupt settings are rejected");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
+void test_bookmark_serialization_hash_and_atomic_load() {
+    const auto hash = content_hash("sample document");
+    require(to_hex(hash).size() == 16, "hash hex width");
+    require(parse_hex_u64(to_hex(hash)).value_or(0) == hash, "hash hex parses");
+    require(!parse_hex_u64("not-a-hash").has_value(), "bad hash rejected");
+
+    BookmarkV1 bookmark;
+    bookmark.doc_id = "bundled-sample";
+    bookmark.content_hash = hash;
+    bookmark.source_byte_offset = 42;
+    bookmark.token_index = 7;
+    bookmark.updated_at = 123456;
+
+    const auto parsed = parse_bookmark(serialize_bookmark(bookmark));
+    require(parsed.has_value(), "bookmark round trip parses");
+    require(parsed->doc_id == "bundled-sample", "bookmark doc id round trip");
+    require(parsed->content_hash == hash, "bookmark hash round trip");
+    require(parsed->source_byte_offset == 42, "bookmark source offset round trip");
+    require(parsed->token_index == 7, "bookmark token index round trip");
+    require(parsed->updated_at == 123456, "bookmark updated time round trip");
+
+    const auto dir = temp_test_dir("bookmark");
+    const auto path = dir / "bookmark.state";
+    require(save_bookmark_atomic(path, bookmark), "bookmark atomic save succeeds");
+    const auto loaded = load_bookmark(path);
+    require(loaded.has_value(), "bookmark atomic load succeeds");
+    require(loaded->token_index == 7, "loaded bookmark token index");
+    require(!std::filesystem::exists(path.string() + ".tmp"), "bookmark temp file removed");
+
+    {
+        std::ofstream corrupt(path, std::ios::binary | std::ios::trunc);
+        corrupt << "schema_version=1\ncontent_hash=" << to_hex(hash) << '\n';
+    }
+    require(!load_bookmark(path).has_value(), "corrupt bookmark is rejected");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 } // namespace
 
 int main() {
@@ -193,6 +294,8 @@ int main() {
     test_playback_overslept_tick_only_advances_once();
     test_seek_rewind_advance_and_finish();
     test_wpm_bounds_and_punctuation_durations();
+    test_settings_serialization_and_atomic_load();
+    test_bookmark_serialization_hash_and_atomic_load();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
