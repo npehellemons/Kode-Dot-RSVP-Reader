@@ -1,0 +1,22 @@
+# Local planning and agent reference material.
+# Keep these offline when this project becomes a GitHub repository.
+AGENTS.md
+README.md
+docs/
+.agents/
+.codex/
+
+# Common local/editor clutter.
+.DS_Store
+*.swp
+*.swo
+
+# Build outputs and test artifacts.
+build/
+cmake-build-*/
+out/
+dist/
+coverage/
+*.gcda
+*.gcno
+*.gcov
