@@ -1,10 +1,13 @@
 #include "rsvp/playback/display_adapter.hpp"
+#include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
 #include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -20,8 +23,18 @@ using rsvp::playback::DisplayAdapter;
 using rsvp::playback::DisplayState;
 using rsvp::playback::PlaybackSettings;
 using rsvp::playback::PlaybackState;
+using rsvp::playback::PunctuationPauseMode;
+using rsvp::storage::BookmarkV1;
+using rsvp::storage::PunctuationMode;
+using rsvp::storage::SettingsV1;
+using rsvp::storage::content_hash;
+using rsvp::storage::load_bookmark;
+using rsvp::storage::load_settings;
+using rsvp::storage::save_bookmark_atomic;
+using rsvp::storage::save_settings_atomic;
 using rsvp::text::tokenize;
 
+constexpr const char* kDocId = "bundled-sample-preview";
 constexpr const char* kSampleText =
     "Welcome to the Kode Dot RSVP Reader.\n\n"
     "This first preview runs entirely on the host machine, but it uses the same "
@@ -89,6 +102,76 @@ std::optional<char> read_key() {
     return std::nullopt;
 }
 
+std::filesystem::path state_dir() {
+    if (const char* override_dir = std::getenv("KODE_RSVP_PREVIEW_STATE_DIR")) {
+        if (override_dir[0] != '\0') {
+            return override_dir;
+        }
+    }
+    return std::filesystem::path("build-host") / "host-preview-state";
+}
+
+std::uint64_t wall_time_seconds() {
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(now).count());
+}
+
+PunctuationPauseMode to_playback_punctuation(PunctuationMode mode) {
+    switch (mode) {
+    case PunctuationMode::off:
+        return PunctuationPauseMode::off;
+    case PunctuationMode::gentle:
+        return PunctuationPauseMode::gentle;
+    }
+    return PunctuationPauseMode::gentle;
+}
+
+PunctuationMode to_storage_punctuation(PunctuationPauseMode mode) {
+    switch (mode) {
+    case PunctuationPauseMode::off:
+        return PunctuationMode::off;
+    case PunctuationPauseMode::gentle:
+        return PunctuationMode::gentle;
+    }
+    return PunctuationMode::gentle;
+}
+
+PlaybackSettings to_playback_settings(const SettingsV1& settings) {
+    PlaybackSettings playback;
+    playback.wpm = settings.wpm;
+    playback.punctuation_pause_mode = to_playback_punctuation(settings.punctuation_mode);
+    return playback;
+}
+
+SettingsV1 settings_from_playback(const PlaybackSettings& playback_settings) {
+    SettingsV1 settings;
+    settings.wpm = playback_settings.wpm;
+    settings.punctuation_mode =
+        to_storage_punctuation(playback_settings.punctuation_pause_mode);
+    return settings;
+}
+
+BookmarkV1 bookmark_from_display(const DisplayState& state,
+                                 std::uint64_t source_hash) {
+    BookmarkV1 bookmark;
+    bookmark.doc_id = kDocId;
+    bookmark.content_hash = source_hash;
+    bookmark.token_index = state.token_index;
+    bookmark.source_byte_offset =
+        state.visible_token ? state.visible_token->source_byte_start : 0;
+    bookmark.updated_at = wall_time_seconds();
+    return bookmark;
+}
+
+void save_preview_state(const std::filesystem::path& dir,
+                        const DisplayState& state,
+                        const PlaybackSettings& playback_settings,
+                        std::uint64_t source_hash) {
+    save_settings_atomic(dir / "settings.state", settings_from_playback(playback_settings));
+    save_bookmark_atomic(dir / "bookmark.state", bookmark_from_display(state, source_hash));
+}
+
 const char* state_label(PlaybackState state) {
     switch (state) {
     case PlaybackState::idle:
@@ -150,10 +233,22 @@ int main() {
 
     TerminalMode terminal_mode;
 
+    const auto dir = state_dir();
+    const auto source_hash = content_hash(kSampleText);
+    const auto stored_settings = load_settings(dir / "settings.state");
+    const auto playback_settings =
+        stored_settings ? to_playback_settings(*stored_settings) : PlaybackSettings{};
+    const auto tokens = tokenize(kSampleText);
+
     DisplayAdapter adapter(
-        tokenize(kSampleText), PlaybackSettings{.wpm = 250},
+        tokens, playback_settings,
         [](const DisplayState& state) { render(state); });
 
+    const auto stored_bookmark = load_bookmark(dir / "bookmark.state");
+    if (stored_bookmark && stored_bookmark->doc_id == kDocId &&
+        stored_bookmark->content_hash == source_hash) {
+        adapter.seek(stored_bookmark->token_index, monotonic_ms());
+    }
     adapter.emit_current();
 
     bool running = true;
@@ -162,26 +257,35 @@ int main() {
             switch (*key) {
             case ' ':
                 toggle_playback(adapter);
+                if (adapter.snapshot().state == PlaybackState::paused ||
+                    adapter.snapshot().state == PlaybackState::finished) {
+                    save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+                }
                 break;
             case 'h':
             case 'H':
                 adapter.rewind_one(monotonic_ms());
+                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'l':
             case 'L':
                 adapter.advance_one(monotonic_ms());
+                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'j':
             case 'J':
                 adapter.set_wpm(adapter.snapshot().wpm - 25);
+                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'k':
             case 'K':
                 adapter.set_wpm(adapter.snapshot().wpm + 25);
+                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'r':
             case 'R':
                 adapter.restart(monotonic_ms());
+                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'q':
             case 'Q':
@@ -196,6 +300,7 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
+    save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
     clear_screen();
     std::cout << "RSVP preview closed.\n";
     return 0;

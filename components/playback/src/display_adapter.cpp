@@ -11,6 +11,10 @@ const DisplayState& DisplayAdapter::snapshot() const {
     return engine_.snapshot();
 }
 
+const PlaybackSettings& DisplayAdapter::settings() const {
+    return engine_.settings();
+}
+
 bool DisplayAdapter::emit_current() {
     return emit_if_changed();
 }

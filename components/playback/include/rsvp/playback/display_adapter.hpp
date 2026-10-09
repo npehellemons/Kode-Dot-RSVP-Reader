@@ -16,6 +16,7 @@ public:
                    Callback callback);
 
     const DisplayState& snapshot() const;
+    const PlaybackSettings& settings() const;
 
     bool emit_current();
     bool start(std::uint64_t monotonic_ms);

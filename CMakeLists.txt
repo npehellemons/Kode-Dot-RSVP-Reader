@@ -32,7 +32,7 @@ target_include_directories(rsvp_storage PUBLIC
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
-target_link_libraries(rsvp_host_preview PRIVATE rsvp_playback)
+target_link_libraries(rsvp_host_preview PRIVATE rsvp_playback rsvp_storage)
 
 include(CTest)
 if(BUILD_TESTING)
