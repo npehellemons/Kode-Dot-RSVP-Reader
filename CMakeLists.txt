@@ -22,6 +22,11 @@ target_include_directories(rsvp_playback PUBLIC
 )
 target_link_libraries(rsvp_playback PUBLIC rsvp_text)
 
+add_executable(rsvp_host_preview
+    apps/host-sim/src/main.cpp
+)
+target_link_libraries(rsvp_host_preview PRIVATE rsvp_playback)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(rsvp_core_tests
