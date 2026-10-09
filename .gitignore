@@ -13,6 +13,7 @@ docs/
 
 # Build outputs and test artifacts.
 build/
+build-host/
 cmake-build-*/
 out/
 dist/
