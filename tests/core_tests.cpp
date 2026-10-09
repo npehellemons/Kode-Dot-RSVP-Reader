@@ -1,3 +1,4 @@
+#include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
@@ -12,6 +13,8 @@ using rsvp::playback::PlaybackEngine;
 using rsvp::playback::PlaybackSettings;
 using rsvp::playback::PlaybackState;
 using rsvp::playback::PunctuationPauseMode;
+using rsvp::playback::DisplayAdapter;
+using rsvp::playback::DisplayState;
 using rsvp::text::PunctuationFlags;
 using rsvp::text::has_flag;
 using rsvp::text::tokenize;
@@ -91,6 +94,55 @@ void test_playback_exact_deadlines_and_pause() {
     require(engine.snapshot().visible_token->text_utf8 == "three", "third token visible");
 }
 
+void test_display_adapter_emits_only_changed_states() {
+    std::vector<DisplayState> events;
+    DisplayAdapter adapter(
+        tokenize("one two three"), PlaybackSettings{.wpm = 300},
+        [&events](const DisplayState& state) { events.push_back(state); });
+
+    require(adapter.emit_current(), "initial display event emitted");
+    require(events.size() == 1, "one initial event");
+    require(events.back().visible_token->text_utf8 == "one", "initial event token");
+    require(!adapter.emit_current(), "unchanged current state is suppressed");
+    require(events.size() == 1, "unchanged emit does not add event");
+
+    require(adapter.start(0), "start emits playing state");
+    require(events.size() == 2, "start event count");
+    require(events.back().state == PlaybackState::playing, "start event state");
+
+    require(!adapter.tick(199), "early tick is suppressed");
+    require(events.size() == 2, "early tick event count");
+
+    require(adapter.tick(200), "deadline tick emits next token");
+    require(events.size() == 3, "deadline tick event count");
+    require(events.back().token_index == 1, "deadline tick token index");
+    require(events.back().visible_token->text_utf8 == "two", "deadline tick token");
+
+    require(adapter.tick(10000), "overslept tick emits one next token");
+    require(events.size() == 4, "overslept tick event count");
+    require(events.back().token_index == 2, "overslept tick advances only once");
+    require(!adapter.tick(10000), "repeated same-time tick is suppressed");
+    require(events.size() == 4, "same-time tick event count");
+}
+
+void test_display_adapter_emits_settings_and_manual_changes() {
+    std::vector<DisplayState> events;
+    DisplayAdapter adapter(
+        tokenize("one two"), PlaybackSettings{.wpm = 250},
+        [&events](const DisplayState& state) { events.push_back(state); });
+
+    adapter.emit_current();
+    require(events.back().wpm == 250, "display state includes initial wpm");
+
+    require(adapter.set_wpm(350), "wpm change emits");
+    require(events.back().wpm == 350, "display event has changed wpm");
+
+    adapter.start(0);
+    require(adapter.pause(), "pause emits");
+    require(events.back().state == PlaybackState::paused, "pause event state");
+    require(!adapter.pause(), "duplicate pause is suppressed");
+}
+
 void test_playback_overslept_tick_only_advances_once() {
     PlaybackEngine engine(tokenize("one two three four"), PlaybackSettings{.wpm = 300});
     engine.start(0);
@@ -136,6 +188,8 @@ int main() {
     test_utf8_boundaries_and_invalid_bytes();
     test_empty_and_whitespace_input();
     test_playback_exact_deadlines_and_pause();
+    test_display_adapter_emits_only_changed_states();
+    test_display_adapter_emits_settings_and_manual_changes();
     test_playback_overslept_tick_only_advances_once();
     test_seek_rewind_advance_and_finish();
     test_wpm_bounds_and_punctuation_durations();

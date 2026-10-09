@@ -14,6 +14,7 @@ target_include_directories(rsvp_text PUBLIC
 )
 
 add_library(rsvp_playback
+    components/playback/src/display_adapter.cpp
     components/playback/src/playback_engine.cpp
 )
 target_include_directories(rsvp_playback PUBLIC

@@ -26,6 +26,7 @@ PlaybackEngine::PlaybackEngine(std::vector<rsvp::text::Token> tokens,
     snapshot_.state = PlaybackState::idle;
     snapshot_.token_index = 0;
     snapshot_.token_count = tokens_.size();
+    snapshot_.wpm = settings_.wpm;
     update_visible_token();
     update_remaining();
 }
@@ -124,6 +125,7 @@ bool PlaybackEngine::set_wpm(int wpm) {
     const auto bounded = std::clamp(wpm, kMinWpm, kMaxWpm);
     const bool accepted = bounded == wpm;
     settings_.wpm = bounded;
+    snapshot_.wpm = bounded;
     update_remaining();
     return accepted;
 }

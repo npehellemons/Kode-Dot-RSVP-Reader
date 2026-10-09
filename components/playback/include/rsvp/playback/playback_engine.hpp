@@ -30,6 +30,7 @@ struct DisplayState {
     PlaybackState state = PlaybackState::idle;
     std::size_t token_index = 0;
     std::size_t token_count = 0;
+    int wpm = 250;
     std::optional<rsvp::text::Token> visible_token;
     std::uint64_t estimated_remaining_ms = 0;
 };
