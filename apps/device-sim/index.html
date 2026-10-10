@@ -25,6 +25,7 @@
       --shadow: rgba(0, 0, 0, 0.38);
       --screen-w: 410;
       --screen-h: 502;
+      --fixation-x: 44%;
     }
 
     * {
@@ -132,7 +133,7 @@
     .reader-area::after {
       content: "";
       position: absolute;
-      left: 50%;
+      left: var(--fixation-x);
       width: 2px;
       height: 34px;
       transform: translateX(-50%);
@@ -153,7 +154,7 @@
       align-self: end;
       justify-self: start;
       position: relative;
-      left: 50%;
+      left: var(--fixation-x);
       max-width: 100%;
       color: var(--text);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
