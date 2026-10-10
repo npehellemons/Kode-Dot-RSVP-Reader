@@ -660,9 +660,11 @@
       schema: "rsvp-display-frames-v1",
       max_codepoints_per_frame: 16
     };
+    const frameDataPath = "sample.frames.json";
     const encoder = new TextEncoder();
     let currentSample = "normal";
     let frameData = buildFrameData(samples[currentSample], frameOptions);
+    let backendFrameData = null;
     const state = {
       index: 0,
       wpm: 250,
@@ -805,6 +807,44 @@
       };
     }
 
+    function isValidFrameData(candidate) {
+      return candidate &&
+        candidate.schema === frameOptions.schema &&
+        Array.isArray(candidate.frames) &&
+        candidate.frames.every((frame, index) =>
+          frame &&
+          frame.index === index &&
+          typeof frame.text === "string" &&
+          Number.isInteger(frame.source_token_index) &&
+          Number.isInteger(frame.chunk_index) &&
+          Number.isInteger(frame.chunk_count) &&
+          Number.isInteger(frame.source_byte_start) &&
+          Number.isInteger(frame.source_byte_length) &&
+          Number.isInteger(frame.orp_codepoint_index) &&
+          typeof frame.centered_fallback === "boolean" &&
+          typeof frame.continuation_before === "boolean" &&
+          typeof frame.continuation_after === "boolean" &&
+          Array.isArray(frame.punctuation_flags)
+        );
+    }
+
+    async function loadBackendFrameData() {
+      try {
+        const response = await fetch(frameDataPath, { cache: "no-store" });
+        if (!response.ok) return false;
+        const candidate = await response.json();
+        if (!isValidFrameData(candidate)) return false;
+        backendFrameData = candidate;
+        frameData = candidate;
+        currentSample = "backend";
+        state.index = 0;
+        state.playing = false;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     function renderWord(current, pivot) {
       word.innerHTML = "";
       word.style.setProperty("--word-size", `${baseWordSize}px`);
@@ -920,8 +960,10 @@
         state.index = 0;
         state.playing = false;
       } else if (action === "longSample") {
-        currentSample = currentSample === "normal" ? "longWords" : "normal";
-        frameData = buildFrameData(samples[currentSample], frameOptions);
+        currentSample = currentSample === "longWords" ? "backend" : "longWords";
+        frameData = currentSample === "longWords"
+          ? buildFrameData(samples.longWords, frameOptions)
+          : backendFrameData || buildFrameData(samples.normal, frameOptions);
         state.index = 0;
         state.playing = false;
       }
@@ -953,7 +995,7 @@
       perform(action);
     });
 
-    render();
+    loadBackendFrameData().then(() => render());
   </script>
 </body>
 </html>
