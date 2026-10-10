@@ -113,6 +113,21 @@
       outline: none;
     }
 
+    .screen::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 8;
+      background: #000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms ease;
+    }
+
+    .screen.is-sleeping::after {
+      opacity: 1;
+    }
+
     .reader-footer {
       color: var(--muted);
       font-size: 13px;
@@ -638,6 +653,7 @@
         <li><code>↑ / ↓</code><span>D-pad up and down adjust WPM in 25 WPM increments.</span></li>
         <li><code>L</code><span>Toggle a long-word sample for fit and split fallback testing.</span></li>
         <li><code>R</code><span>Hold red behavior: jump to the start of the sentence and pause.</span></li>
+        <li><code>S</code><span>Simulate sleep by turning the screen black.</span></li>
       </ul>
 
       <div class="sim-actions">
@@ -645,6 +661,7 @@
         <button type="button" data-action="sentenceBack">Hold Red</button>
         <button type="button" data-action="slower">Slower</button>
         <button type="button" data-action="faster">Faster</button>
+        <button type="button" data-action="sleep">Sleep</button>
         <button type="button" data-action="longSample">Long-word sample</button>
       </div>
 
@@ -668,13 +685,17 @@
     let backendFrameData = null;
     let redHoldTimer = 0;
     let suppressNextRedClick = false;
+    const sleepDelayMs = 4000;
     const state = {
       index: 0,
       wpm: 250,
       playing: false,
-      timer: 0
+      timer: 0,
+      sleeping: false,
+      sleepTimer: 0
     };
 
+    const screen = document.getElementById("screen");
     const word = document.getElementById("word");
     const readerArea = document.querySelector(".reader-area");
     const wpm = document.getElementById("wpm");
@@ -717,6 +738,7 @@
       const remainingSeconds = Math.ceil((remainingFrames * (60000 / state.wpm)) / 1000);
       remaining.textContent = `0:${String(remainingSeconds).padStart(2, "0")}`;
       fitWordToScreen(current);
+      screen.classList.toggle("is-sleeping", state.sleeping);
     }
 
     function utf8ByteLength(text) {
@@ -965,13 +987,45 @@
       state.timer = 0;
     }
 
+    function stopSleepTimer() {
+      window.clearTimeout(state.sleepTimer);
+      state.sleepTimer = 0;
+    }
+
+    function sleepScreen() {
+      if (state.playing) return;
+      stopTimer();
+      stopSleepTimer();
+      state.sleeping = true;
+      render();
+    }
+
+    function wakeScreen() {
+      state.sleeping = false;
+      stopSleepTimer();
+      render();
+      scheduleSleepIfPaused();
+    }
+
+    function scheduleSleepIfPaused() {
+      stopSleepTimer();
+      if (state.playing || state.sleeping) return;
+      state.sleepTimer = window.setTimeout(() => {
+        sleepScreen();
+      }, sleepDelayMs);
+    }
+
     function scheduleNext() {
       stopTimer();
+      if (state.playing) {
+        stopSleepTimer();
+      }
       if (!state.playing) return;
       state.timer = window.setTimeout(() => {
         if (state.index + 1 >= frameData.frames.length) {
           state.playing = false;
           render();
+          scheduleSleepIfPaused();
           return;
         }
         state.index += 1;
@@ -989,11 +1043,19 @@
 
     function perform(action) {
       pulse(action);
+      if (state.sleeping) {
+        if (action === "toggle") {
+          wakeScreen();
+        }
+        return;
+      }
       if (action === "toggle") {
         if (state.index >= frameData.frames.length - 1 && !state.playing) state.index = 0;
         state.playing = !state.playing;
+        state.sleeping = false;
         render();
         scheduleNext();
+        if (!state.playing) scheduleSleepIfPaused();
         return;
       }
       if (action === "back") {
@@ -1012,6 +1074,10 @@
           ? previousSentenceStartBefore(currentStart)
           : currentStart;
         state.playing = false;
+      } else if (action === "sleep") {
+        state.playing = false;
+        sleepScreen();
+        return;
       } else if (action === "menu") {
         return;
       } else if (action === "longSample") {
@@ -1024,6 +1090,7 @@
       }
       render();
       scheduleNext();
+      scheduleSleepIfPaused();
     }
 
     document.addEventListener("click", (event) => {
@@ -1066,7 +1133,9 @@
         l: "longSample",
         L: "longSample",
         r: "sentenceBack",
-        R: "sentenceBack"
+        R: "sentenceBack",
+        s: "sleep",
+        S: "sleep"
       };
       const action = map[event.key];
       if (!action) return;
@@ -1074,7 +1143,10 @@
       perform(action);
     });
 
-    loadBackendFrameData().then(() => render());
+    loadBackendFrameData().then(() => {
+      render();
+      scheduleSleepIfPaused();
+    });
   </script>
 </body>
 </html>
