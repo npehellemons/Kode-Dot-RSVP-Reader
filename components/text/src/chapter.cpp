@@ -8,6 +8,7 @@ namespace {
 struct Heading {
     std::string title;
     std::size_t byte_start = 0;
+    bool skip_front_matter = false;
 };
 
 std::string trim_heading_title(std::string_view line) {
@@ -39,6 +40,64 @@ bool is_heading_line(std::string_view line) {
            (line[hashes] == ' ' || line[hashes] == '\t');
 }
 
+bool is_roman_numeral(char ch) {
+    return ch == 'I' || ch == 'V' || ch == 'X' || ch == 'L' ||
+           ch == 'C' || ch == 'D' || ch == 'M';
+}
+
+bool has_lowercase_ascii(std::string_view value) {
+    for (const char ch : value) {
+        if (ch >= 'a' && ch <= 'z') {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string trim_ascii(std::string_view value) {
+    std::size_t first = 0;
+    while (first < value.size() && (value[first] == ' ' || value[first] == '\t' ||
+                                   value[first] == '\r')) {
+        ++first;
+    }
+
+    std::size_t last = value.size();
+    while (last > first && (value[last - 1] == ' ' || value[last - 1] == '\t' ||
+                           value[last - 1] == '\r')) {
+        --last;
+    }
+    return std::string(value.substr(first, last - first));
+}
+
+bool is_gutenberg_chapter_line(std::string_view line) {
+    if (line.empty() || line.front() == ' ' || line.front() == '\t') {
+        return false;
+    }
+
+    std::size_t index = 0;
+    while (index < line.size() && is_roman_numeral(line[index])) {
+        ++index;
+    }
+    if (index == 0 || index >= line.size() || line[index] != '.') {
+        return false;
+    }
+
+    ++index;
+    if (index >= line.size() || (line[index] != ' ' && line[index] != '\t')) {
+        return false;
+    }
+
+    const auto title = trim_ascii(line.substr(index));
+    return !title.empty() && title.size() <= 96 && !has_lowercase_ascii(title);
+}
+
+std::string title_from_heading_line(std::string_view line) {
+    if (is_heading_line(line)) {
+        return trim_heading_title(line);
+    }
+    return trim_ascii(line);
+}
+
 std::vector<Heading> headings_from_source(std::string_view source) {
     std::vector<Heading> headings;
     std::size_t line_start = 0;
@@ -48,10 +107,12 @@ std::vector<Heading> headings_from_source(std::string_view source) {
                                 ? source.size() - line_start
                                 : line_end - line_start;
         const auto line = source.substr(line_start, length);
-        if (is_heading_line(line)) {
-            auto title = trim_heading_title(line);
+        const bool markdown_heading = is_heading_line(line);
+        const bool gutenberg_heading = is_gutenberg_chapter_line(line);
+        if (markdown_heading || gutenberg_heading) {
+            auto title = title_from_heading_line(line);
             if (!title.empty()) {
-                headings.push_back({std::move(title), line_start});
+                headings.push_back({std::move(title), line_start, gutenberg_heading});
             }
         }
 
@@ -100,8 +161,8 @@ std::vector<Chapter> make_chapters_from_markdown_headings(
         return make_single_chapter(frames, std::move(fallback_title));
     }
 
-    if (headings.front().byte_start > 0) {
-        headings.insert(headings.begin(), {std::move(fallback_title), 0});
+    if (headings.front().byte_start > 0 && !headings.front().skip_front_matter) {
+        headings.insert(headings.begin(), {std::move(fallback_title), 0, false});
     }
 
     std::vector<Chapter> chapters;

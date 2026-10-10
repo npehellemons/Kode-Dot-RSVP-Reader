@@ -311,6 +311,30 @@ void test_chapters_from_markdown_headings() {
     require(fallback[0].title == "Fallback", "fallback chapter title");
 }
 
+void test_chapters_from_gutenberg_roman_headings() {
+    const std::string source =
+        "Contents\n"
+        "   I.     A Scandal in Bohemia\n\n"
+        "I. A SCANDAL IN BOHEMIA\n\n"
+        "Alpha beta.\n\n"
+        "I.\n\n"
+        "Inside sentence.\n\n"
+        "II. THE RED-HEADED LEAGUE\n\n"
+        "Gamma delta.";
+    const auto frames = make_display_frames(tokenize(source));
+    const auto chapters = make_chapters_from_markdown_headings(source, frames);
+
+    require(chapters.size() == 2, "gutenberg chapter count");
+    require(chapters[0].title == "I. A SCANDAL IN BOHEMIA",
+            "first gutenberg chapter title");
+    require(chapters[1].title == "II. THE RED-HEADED LEAGUE",
+            "second gutenberg chapter title");
+    require(chapters[0].first_frame_index > 0,
+            "gutenberg contents preface is not a chapter");
+    require(chapters[1].first_frame_index > chapters[0].first_frame_index,
+            "second gutenberg chapter starts later");
+}
+
 void test_playback_advances_by_display_frame() {
     DisplayFrameOptions options;
     options.max_codepoints_per_frame = 8;
@@ -662,6 +686,7 @@ int main() {
     test_display_frames_chunk_long_tokens();
     test_display_frames_preserve_utf8_boundaries();
     test_chapters_from_markdown_headings();
+    test_chapters_from_gutenberg_roman_headings();
     test_playback_advances_by_display_frame();
     test_playback_exposes_chapter_progress_and_remaining_time();
     test_playback_word_navigation_pauses_and_skips_chunks();
