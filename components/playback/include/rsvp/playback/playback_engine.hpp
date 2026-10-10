@@ -50,6 +50,20 @@ struct DisplayState {
     std::uint64_t estimated_chapter_remaining_ms = 0;
 };
 
+struct SentenceContextWindow {
+    std::size_t start_frame_index = 0;
+    std::size_t end_frame_index = 0;
+    std::size_t current_frame_index = 0;
+    std::size_t current_source_token_index = 0;
+};
+
+struct FrameNavigation {
+    std::size_t previous_word_frame_index = 0;
+    std::size_t next_word_frame_index = 0;
+    std::size_t sentence_rewind_frame_index = 0;
+    bool starts_chapter = false;
+};
+
 class PlaybackEngine {
 public:
     explicit PlaybackEngine(std::vector<rsvp::text::Token> tokens,
@@ -78,6 +92,9 @@ public:
 
     bool tick(std::uint64_t monotonic_ms);
     std::uint64_t duration_for_index(std::size_t frame_index) const;
+    SentenceContextWindow sentence_context_for_frame(std::size_t frame_index) const;
+    SentenceContextWindow current_sentence_context() const;
+    FrameNavigation navigation_for_frame(std::size_t frame_index) const;
 
     static constexpr int kMinWpm = 100;
     static constexpr int kMaxWpm = 600;
@@ -86,9 +103,13 @@ private:
     std::uint64_t base_duration_ms() const;
     void seek_and_pause(std::size_t frame_index, std::uint64_t monotonic_ms);
     std::size_t first_frame_for_source_token(std::size_t source_token_index) const;
+    std::size_t previous_word_frame_for_frame(std::size_t frame_index) const;
+    std::size_t next_word_frame_for_frame(std::size_t frame_index) const;
+    std::size_t sentence_rewind_frame_for_frame(std::size_t frame_index) const;
     std::size_t previous_word_frame() const;
     std::size_t next_word_frame() const;
     std::size_t sentence_start_for_frame(std::size_t frame_index) const;
+    std::size_t sentence_end_for_frame(std::size_t frame_index) const;
     std::size_t previous_sentence_start_before(std::size_t frame_index) const;
     std::size_t chapter_index_for_frame(std::size_t frame_index) const;
     void update_visible_token();

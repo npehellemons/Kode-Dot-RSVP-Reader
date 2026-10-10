@@ -428,6 +428,27 @@ void test_document_text_frame_chapter_mapping() {
             "document text second frame chapter starts later");
 }
 
+void test_txt_import_hides_skipped_front_matter() {
+    const std::string source =
+        "Project boilerplate that should not be read.\n\n"
+        "I. FIRST STORY\n\n"
+        "Alpha beta.\n\n"
+        "II. SECOND STORY\n\n"
+        "Gamma delta.";
+    const auto document = import_txt_document(source, "Stories.txt");
+    const auto frames = make_display_frames(tokenize(document.reading_text_utf8));
+    const auto chapters = make_frame_chapters(document, frames);
+
+    require(document.chapter_source == ChapterSource::explicit_headings,
+            "txt import front matter fixture has explicit chapters");
+    require(!frames.empty(), "txt import front matter fixture has frames");
+    require(frames.front().text_utf8 == "Alpha",
+            "txt import hides skipped front matter and first heading");
+    require(chapters.size() == 2, "txt import front matter chapter count");
+    require(chapters[0].first_frame_index == 0,
+            "txt import first chapter starts at first readable frame");
+}
+
 void test_playback_advances_by_display_frame() {
     DisplayFrameOptions options;
     options.max_codepoints_per_frame = 8;
@@ -582,6 +603,48 @@ void test_playback_sentence_rewind_pauses_and_repeats() {
     engine.rewind_sentence(0);
     require(engine.snapshot().visible_frame->text_utf8 == "First",
             "sentence rewind clamps at document start");
+}
+
+void test_playback_sentence_context_window() {
+    auto frames = make_display_frames(tokenize("First one. Second two. Third three."));
+    PlaybackEngine engine(frames, PlaybackSettings{.wpm = 300});
+    engine.seek(3, 0);
+
+    const auto context = engine.current_sentence_context();
+    require(context.current_frame_index == 3, "context current frame index");
+    require(context.current_source_token_index == frames[3].source_token_index,
+            "context current source token index");
+    require(context.start_frame_index == 0,
+            "context includes previous sentence start");
+    require(context.end_frame_index == 5,
+            "context includes next sentence end");
+
+    const auto first_context = engine.sentence_context_for_frame(0);
+    require(first_context.start_frame_index == 0,
+            "first context clamps start");
+    require(first_context.end_frame_index == 3,
+            "first context includes next sentence");
+}
+
+void test_playback_exports_frame_navigation_targets() {
+    auto frames = make_display_frames(tokenize("First one. Second two. Third three."));
+    PlaybackEngine engine(frames, PlaybackSettings{.wpm = 300});
+
+    const auto middle = engine.navigation_for_frame(3);
+    require(middle.previous_word_frame_index == 2,
+            "navigation previous word target");
+    require(middle.next_word_frame_index == 4,
+            "navigation next word target");
+    require(middle.sentence_rewind_frame_index == 2,
+            "navigation sentence rewind target");
+    require(!middle.starts_chapter, "navigation middle frame not chapter start");
+
+    const auto first = engine.navigation_for_frame(0);
+    require(first.previous_word_frame_index == 0,
+            "navigation first previous clamps");
+    require(first.sentence_rewind_frame_index == 0,
+            "navigation first sentence rewind clamps");
+    require(first.starts_chapter, "navigation first frame starts fallback chapter");
 }
 
 std::filesystem::path temp_test_dir(const char* name) {
@@ -784,10 +847,13 @@ int main() {
     test_txt_import_uses_filename_fallback();
     test_txt_import_auto_chunks_long_plain_text();
     test_document_text_frame_chapter_mapping();
+    test_txt_import_hides_skipped_front_matter();
     test_playback_advances_by_display_frame();
     test_playback_exposes_chapter_progress_and_remaining_time();
     test_playback_word_navigation_pauses_and_skips_chunks();
     test_playback_sentence_rewind_pauses_and_repeats();
+    test_playback_sentence_context_window();
+    test_playback_exports_frame_navigation_targets();
     test_settings_serialization_and_atomic_load();
     test_bookmark_serialization_hash_and_atomic_load();
     test_lifecycle_sleep_pauses_persists_and_does_not_advance();

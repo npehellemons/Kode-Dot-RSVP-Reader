@@ -282,6 +282,9 @@ DocumentText import_txt_document(
     if (source_chapters.size() > 1 ||
         (source_chapters.size() == 1 && source_chapters.front().title != document.title)) {
         document.chapter_source = ChapterSource::explicit_headings;
+        if (!source_chapters.empty() && source_chapters.front().source_byte_start > 0) {
+            reading_exclusions.push_back({0, source_chapters.front().source_byte_start});
+        }
         add_heading_ranges(reading_exclusions, source, source_chapters);
         document.reading_text_utf8 = make_reading_text(source, reading_exclusions);
         document.chapters = std::move(source_chapters);

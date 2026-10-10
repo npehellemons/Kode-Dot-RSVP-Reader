@@ -1,4 +1,5 @@
 #include "rsvp/library/document_text.hpp"
+#include "rsvp/playback/playback_engine.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
@@ -18,6 +19,7 @@ using rsvp::library::MetadataConfidence;
 using rsvp::library::TxtImportOptions;
 using rsvp::library::import_txt_document;
 using rsvp::library::make_frame_chapters;
+using rsvp::playback::PlaybackEngine;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
 
@@ -173,6 +175,7 @@ int main(int argc, char* argv[]) {
     const auto document = import_txt_document(source, filename, import_options);
     const auto frames = make_display_frames(tokenize(document.reading_text_utf8), options);
     const auto chapters = make_frame_chapters(document, frames);
+    const PlaybackEngine playback(frames, chapters);
 
     std::cout << "{\n  \"schema\": \"rsvp-display-frames-v1\",\n";
     std::cout << "  \"document\": {\n";
@@ -220,6 +223,22 @@ int main(int argc, char* argv[]) {
         std::cout << "      \"source_byte_start\": " << frame.source_byte_start << ",\n";
         std::cout << "      \"source_byte_length\": " << frame.source_byte_length << ",\n";
         std::cout << "      \"orp_codepoint_index\": " << frame.orp_codepoint_index << ",\n";
+        const auto context = playback.sentence_context_for_frame(index);
+        const auto navigation = playback.navigation_for_frame(index);
+        std::cout << "      \"duration_ms\": "
+                  << playback.duration_for_index(index) << ",\n";
+        std::cout << "      \"previous_word_frame_index\": "
+                  << navigation.previous_word_frame_index << ",\n";
+        std::cout << "      \"next_word_frame_index\": "
+                  << navigation.next_word_frame_index << ",\n";
+        std::cout << "      \"sentence_rewind_frame_index\": "
+                  << navigation.sentence_rewind_frame_index << ",\n";
+        std::cout << "      \"starts_chapter\": "
+                  << (navigation.starts_chapter ? "true" : "false") << ",\n";
+        std::cout << "      \"context_start_frame_index\": "
+                  << context.start_frame_index << ",\n";
+        std::cout << "      \"context_end_frame_index\": "
+                  << context.end_frame_index << ",\n";
         std::cout << "      \"centered_fallback\": "
                   << (frame.centered_fallback ? "true" : "false") << ",\n";
         std::cout << "      \"continuation_before\": "

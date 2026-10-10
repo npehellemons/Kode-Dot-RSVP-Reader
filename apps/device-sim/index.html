@@ -109,7 +109,7 @@
       position: relative;
       overflow: hidden;
       display: grid;
-      grid-template-rows: 1fr 70px;
+      grid-template-rows: 42px 1fr 58px;
       outline: none;
     }
 
@@ -128,10 +128,23 @@
       opacity: 1;
     }
 
+    .reader-header,
     .reader-footer {
       color: var(--muted);
       font-size: 13px;
       min-width: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .reader-header {
+      display: flex;
+      align-items: center;
+      padding: 16px 22px 0;
+    }
+
+    .reader-header .chapter-index {
+      color: var(--rsvp-red);
+      white-space: nowrap;
     }
 
     .reader-area {
@@ -158,11 +171,18 @@
     }
 
     .reader-area::before {
-      top: 28px;
+      top: 8px;
     }
 
     .reader-area::after {
-      bottom: 24px;
+      bottom: 10px;
+    }
+
+    .reader-area.title-card::before,
+    .reader-area.title-card::after,
+    .reader-area.context-view::before,
+    .reader-area.context-view::after {
+      opacity: 0;
     }
 
     .word {
@@ -195,6 +215,53 @@
       text-shadow: 0 0 22px rgba(242, 91, 91, 0.62);
     }
 
+    .reader-area.title-card .word {
+      left: 50%;
+      max-width: calc(100% - 20px);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 24px;
+      line-height: 1.12;
+      font-weight: 650;
+      text-align: center;
+      white-space: normal;
+      text-wrap: balance;
+      transform: translateX(-50%);
+    }
+
+    .reader-area.context-view {
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+    }
+
+    .reader-area.context-view .word {
+      left: auto;
+      width: 100%;
+      max-width: 100%;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 18px;
+      line-height: 1.28;
+      font-weight: 450;
+      white-space: normal;
+      overflow: hidden;
+      transform: none;
+    }
+
+    .context-lines {
+      display: -webkit-box;
+      -webkit-line-clamp: 7;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .context-word.is-current {
+      color: var(--rsvp-red);
+      font-weight: 750;
+      text-shadow: 0 0 16px rgba(242, 91, 91, 0.48);
+    }
+
     .progress {
       width: 100%;
       height: 3px;
@@ -215,11 +282,10 @@
     .reader-footer {
       display: grid;
       grid-template-columns: 1fr auto 1fr;
-      grid-template-rows: auto auto auto;
+      grid-template-rows: auto auto;
       gap: 9px 10px;
       align-content: center;
-      padding: 0 20px 14px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 0 20px 13px;
     }
 
     .reader-footer .center-stat {
@@ -229,12 +295,6 @@
 
     .reader-footer .right-stat {
       justify-self: end;
-    }
-
-    .reader-footer .fit-stat {
-      grid-column: 1 / -1;
-      color: var(--amber);
-      justify-self: center;
     }
 
     .front-controls {
@@ -580,6 +640,9 @@
       <div class="device">
         <div class="screen-shell">
           <div class="screen" id="screen">
+            <div class="reader-header">
+              <span id="chapter-index" class="chapter-index">Ch 1/1</span>
+            </div>
             <div class="reader-area">
               <div></div>
               <div>
@@ -594,7 +657,6 @@
               <span id="position">1/30</span>
               <span id="wpm" class="center-stat">250 WPM</span>
               <span id="remaining" class="right-stat">0:14</span>
-              <span id="fit-status" class="fit-stat" aria-live="polite"></span>
             </div>
           </div>
         </div>
@@ -651,18 +713,14 @@
         <li><code>Space</code><span>Red button toggles play and pause.</span></li>
         <li><code>← / →</code><span>D-pad left and right step one word and pause playback.</span></li>
         <li><code>↑ / ↓</code><span>D-pad up and down adjust WPM in 25 WPM increments.</span></li>
-        <li><code>L</code><span>Toggle a long-word sample for fit and split fallback testing.</span></li>
-        <li><code>R</code><span>Hold red behavior: jump to the start of the sentence and pause.</span></li>
         <li><code>S</code><span>Simulate sleep by turning the screen black.</span></li>
       </ul>
 
       <div class="sim-actions">
         <button type="button" data-action="toggle">Red Play / Pause</button>
-        <button type="button" data-action="sentenceBack">Hold Red</button>
         <button type="button" data-action="slower">Slower</button>
         <button type="button" data-action="faster">Faster</button>
         <button type="button" data-action="sleep">Sleep</button>
-        <button type="button" data-action="longSample">Long-word sample</button>
       </div>
 
       <p class="note">Body dimensions use the provided 73 × 43 × 15 mm reference. This simulator intentionally shows only the front face. Button and bezel placements are production-style approximations until measured from a physical device.</p>
@@ -670,44 +728,52 @@
   </main>
 
   <script>
-    const samples = {
-      normal: "Welcome to the Kode Dot RSVP Reader. This simulator keeps the actual screen resolution visible while we refine layout, controls, pacing, and saved reading state before using real device APIs.",
-      longWords: "Fit comfortable counterrevolutionaries incomprehensibilities pneumonoultramicroscopicsilicovolcanoconiosis antidisestablishmentarianism supercalifragilisticexpialidocious end."
-    };
     const frameOptions = {
       schema: "rsvp-display-frames-v1",
       max_codepoints_per_frame: 16
     };
     const frameDataPath = "sample.frames.json";
-    const encoder = new TextEncoder();
-    let currentSample = "normal";
-    let frameData = buildFrameData(samples[currentSample], frameOptions);
+    let frameData = {
+      schema: frameOptions.schema,
+      max_codepoints_per_frame: frameOptions.max_codepoints_per_frame,
+      chapters: [],
+      frames: []
+    };
     let backendFrameData = null;
-    let redHoldTimer = 0;
     let suppressNextRedClick = false;
+    let redPointerActive = false;
+    let dpadHoldTimer = 0;
+    let dpadRepeatTimer = 0;
+    let suppressNextDpadClick = "";
     const sleepDelayMs = 4000;
+    const chapterTitleDelayMs = 1800;
     const state = {
       index: 0,
       wpm: 250,
       playing: false,
       timer: 0,
       sleeping: false,
-      sleepTimer: 0
+      sleepTimer: 0,
+      titleCard: true,
+      contextView: false
     };
 
     const screen = document.getElementById("screen");
     const word = document.getElementById("word");
     const readerArea = document.querySelector(".reader-area");
+    const chapterIndex = document.getElementById("chapter-index");
     const wpm = document.getElementById("wpm");
     const position = document.getElementById("position");
     const progressFill = document.getElementById("progress-fill");
     const progress = document.querySelector(".progress");
     const remaining = document.getElementById("remaining");
-    const fitStatus = document.getElementById("fit-status");
     const baseWordSize = 50;
     const minWordSize = 28;
 
     function durationForFrame(current) {
+      if (current && Number.isInteger(current.duration_ms)) {
+        return Math.ceil((current.duration_ms * 250) / state.wpm);
+      }
       const base = Math.ceil(60000 / state.wpm);
       if (!current) return base;
       if (current.punctuation_flags.includes("sentence_end")) return base * 2;
@@ -719,21 +785,27 @@
       return durationForFrame(frameData.frames[state.index]);
     }
 
+    function formatDuration(totalSeconds) {
+      const seconds = Math.max(0, totalSeconds);
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainder = seconds % 60;
+      if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+      }
+      return `${minutes}:${String(remainder).padStart(2, "0")}`;
+    }
+
     function render() {
       const current = frameData.frames[state.index];
       const currentText = current ? current.text : "";
-      readerArea.classList.remove("needs-chunking", "center-fallback");
-      fitStatus.textContent = "";
-      renderWord(currentText, current ? current.orp_codepoint_index : 0);
-      if (current && current.centered_fallback) {
-        readerArea.classList.add("center-fallback");
-        fitStatus.textContent = current.chunk_count > 1
-          ? `${current.chunk_index + 1}/${current.chunk_count}`
-          : "centered";
-      }
       const chapter = currentChapter();
+      const allChapters = chapters();
+      const chapterNumber = Math.max(1, allChapters.indexOf(chapter) + 1);
       const chapterFrameIndex = Math.max(0, state.index - chapter.first_frame_index);
       const chapterFrameCount = Math.max(1, chapter.frame_count);
+      readerArea.classList.remove("needs-chunking", "center-fallback", "title-card", "context-view");
+      chapterIndex.textContent = `Ch ${chapterNumber}/${allChapters.length}`;
       position.textContent = `${Math.min(chapterFrameIndex + 1, chapterFrameCount)}/${chapterFrameCount}`;
       const pct = chapterFrameCount <= 1
         ? 100
@@ -743,112 +815,30 @@
       document.querySelector('[data-action="toggle"].round-button').textContent = state.playing ? "Ⅱ" : "▶";
       wpm.textContent = `${state.wpm} WPM`;
       const remainingSeconds = Math.ceil(chapterRemainingMs(chapter) / 1000);
-      remaining.textContent = `0:${String(remainingSeconds).padStart(2, "0")}`;
+      remaining.textContent = formatDuration(remainingSeconds);
+
+      if (state.titleCard) {
+        renderChapterTitle(chapter.title || "Frame data unavailable");
+        screen.classList.toggle("is-sleeping", state.sleeping);
+        return;
+      }
+
+      if (state.contextView) {
+        renderContextView();
+        screen.classList.toggle("is-sleeping", state.sleeping);
+        return;
+      }
+
+      renderWord(currentText, current ? current.orp_codepoint_index : 0);
+      if (current && current.centered_fallback) {
+        readerArea.classList.add("center-fallback");
+      }
       fitWordToScreen(current);
       screen.classList.toggle("is-sleeping", state.sleeping);
     }
 
-    function utf8ByteLength(text) {
-      return encoder.encode(text).length;
-    }
-
-    function punctuationFlags(text, paragraphBreakBefore) {
-      const flags = [];
-      if (/[,;:]$/.test(text)) flags.push("comma");
-      if (/[.!?]$/.test(text)) flags.push("sentence_end");
-      if (paragraphBreakBefore) flags.push("paragraph_break_before");
-      return flags;
-    }
-
-    function orpIndex(codepointCount) {
-      if (codepointCount <= 1) return 0;
-      if (codepointCount <= 5) return 1;
-      if (codepointCount <= 9) return 2;
-      if (codepointCount <= 13) return 3;
-      return 4;
-    }
-
     function centeredIndex(codepointCount) {
       return Math.max(0, Math.floor((codepointCount - 1) / 2));
-    }
-
-    function tokenizeForFrames(source) {
-      const tokens = [];
-      const matches = source.matchAll(/\S+/gu);
-      for (const match of matches) {
-        const text = match[0];
-        const prefix = source.slice(0, match.index);
-        const paragraphBreakBefore = /\n\s*\n/.test(prefix.slice(-4));
-        tokens.push({
-          text,
-          source_byte_start: utf8ByteLength(prefix),
-          source_byte_length: utf8ByteLength(text),
-          punctuation_flags: punctuationFlags(text, paragraphBreakBefore)
-        });
-      }
-      return tokens;
-    }
-
-    function buildFrameData(source, options) {
-      const frames = [];
-      const tokens = tokenizeForFrames(source);
-      for (let sourceTokenIndex = 0; sourceTokenIndex < tokens.length; sourceTokenIndex += 1) {
-        const token = tokens[sourceTokenIndex];
-        const codepoints = Array.from(token.text);
-        const split = codepoints.length > options.max_codepoints_per_frame;
-        const chunkCount = split
-          ? Math.ceil(codepoints.length / options.max_codepoints_per_frame)
-          : 1;
-        let tokenByteOffset = 0;
-
-        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-          const firstCodepoint = chunkIndex * options.max_codepoints_per_frame;
-          const visibleCodepoints = split
-            ? codepoints.slice(firstCodepoint, firstCodepoint + options.max_codepoints_per_frame)
-            : codepoints;
-          const sourceText = visibleCodepoints.join("");
-          const continuationAfter = chunkIndex + 1 < chunkCount;
-          const frameText = continuationAfter ? `${sourceText}-` : sourceText;
-          const sourceByteLength = utf8ByteLength(sourceText);
-
-          frames.push({
-            index: frames.length,
-            text: frameText,
-            source_token_index: sourceTokenIndex,
-            chunk_index: chunkIndex,
-            chunk_count: chunkCount,
-            source_byte_start: token.source_byte_start + tokenByteOffset,
-            source_byte_length: sourceByteLength,
-            orp_codepoint_index: split
-              ? centeredIndex(Array.from(frameText).length)
-              : orpIndex(codepoints.length),
-            centered_fallback: split,
-            continuation_before: chunkIndex > 0,
-            continuation_after: continuationAfter,
-            punctuation_flags: chunkIndex + 1 === chunkCount ? token.punctuation_flags : []
-          });
-
-          tokenByteOffset += sourceByteLength;
-        }
-      }
-
-      return {
-        schema: options.schema,
-        max_codepoints_per_frame: options.max_codepoints_per_frame,
-        chapters: [{
-          index: 0,
-          title: "Document",
-          source_byte_start: frames[0] ? frames[0].source_byte_start : 0,
-          source_byte_length: frames.length
-            ? frames[frames.length - 1].source_byte_start +
-              frames[frames.length - 1].source_byte_length -
-              frames[0].source_byte_start
-            : 0,
-          first_frame_index: 0,
-          frame_count: frames.length
-        }],
-        frames
-      };
     }
 
     function isValidFrameData(candidate) {
@@ -874,10 +864,24 @@
           Number.isInteger(frame.source_token_index) &&
           Number.isInteger(frame.chunk_index) &&
           Number.isInteger(frame.chunk_count) &&
-          Number.isInteger(frame.source_byte_start) &&
-          Number.isInteger(frame.source_byte_length) &&
-          Number.isInteger(frame.orp_codepoint_index) &&
-          typeof frame.centered_fallback === "boolean" &&
+            Number.isInteger(frame.source_byte_start) &&
+            Number.isInteger(frame.source_byte_length) &&
+            Number.isInteger(frame.orp_codepoint_index) &&
+            (frame.duration_ms === undefined ||
+              Number.isInteger(frame.duration_ms)) &&
+            (frame.previous_word_frame_index === undefined ||
+              Number.isInteger(frame.previous_word_frame_index)) &&
+            (frame.next_word_frame_index === undefined ||
+              Number.isInteger(frame.next_word_frame_index)) &&
+            (frame.sentence_rewind_frame_index === undefined ||
+              Number.isInteger(frame.sentence_rewind_frame_index)) &&
+            (frame.starts_chapter === undefined ||
+              typeof frame.starts_chapter === "boolean") &&
+            (frame.context_start_frame_index === undefined ||
+              Number.isInteger(frame.context_start_frame_index)) &&
+            (frame.context_end_frame_index === undefined ||
+              Number.isInteger(frame.context_end_frame_index)) &&
+            typeof frame.centered_fallback === "boolean" &&
           typeof frame.continuation_before === "boolean" &&
           typeof frame.continuation_after === "boolean" &&
           Array.isArray(frame.punctuation_flags)
@@ -892,9 +896,9 @@
         if (!isValidFrameData(candidate)) return false;
         backendFrameData = candidate;
         frameData = candidate;
-        currentSample = "backend";
         state.index = 0;
         state.playing = false;
+        state.titleCard = true;
         return true;
       } catch {
         return false;
@@ -927,6 +931,14 @@
       return allChapters[allChapters.length - 1];
     }
 
+    function isChapterStart(frameIndex) {
+      const frame = frameData.frames[frameIndex];
+      if (frame && typeof frame.starts_chapter === "boolean") {
+        return frame.starts_chapter;
+      }
+      return chapters().some((chapter) => chapter.first_frame_index === frameIndex);
+    }
+
     function chapterRemainingMs(chapter) {
       const past = Math.min(chapter.first_frame_index + chapter.frame_count,
         frameData.frames.length);
@@ -945,6 +957,10 @@
     function previousWordFrame() {
       const current = frameData.frames[state.index];
       if (!current) return 0;
+      if (Number.isInteger(current.previous_word_frame_index)) {
+        return Math.max(0, Math.min(frameData.frames.length - 1,
+          current.previous_word_frame_index));
+      }
       for (let index = state.index - 1; index >= 0; index -= 1) {
         const candidate = frameData.frames[index];
         if (candidate.source_token_index < current.source_token_index) {
@@ -957,6 +973,10 @@
     function nextWordFrame() {
       const current = frameData.frames[state.index];
       if (!current) return 0;
+      if (Number.isInteger(current.next_word_frame_index)) {
+        return Math.max(0, Math.min(frameData.frames.length - 1,
+          current.next_word_frame_index));
+      }
       for (let index = state.index + 1; index < frameData.frames.length; index += 1) {
         const candidate = frameData.frames[index];
         if (candidate.source_token_index > current.source_token_index) {
@@ -982,6 +1002,58 @@
       return sentenceStartForFrame(frameIndex - 1);
     }
 
+    function sentenceRewindFrame() {
+      const current = frameData.frames[state.index];
+      if (current && Number.isInteger(current.sentence_rewind_frame_index)) {
+        return Math.max(0, Math.min(frameData.frames.length - 1,
+          current.sentence_rewind_frame_index));
+      }
+      const currentStart = sentenceStartForFrame(state.index);
+      return state.index === currentStart
+        ? previousSentenceStartBefore(currentStart)
+        : currentStart;
+    }
+
+    function sentenceEndForFrame(frameIndex) {
+      const chapter = currentChapter();
+      const chapterEnd = Math.min(chapter.first_frame_index + chapter.frame_count,
+        frameData.frames.length);
+      for (let index = Math.max(0, frameIndex); index < chapterEnd; index += 1) {
+        if (frameData.frames[index].punctuation_flags.includes("sentence_end")) {
+          return index;
+        }
+      }
+      return Math.max(0, chapterEnd - 1);
+    }
+
+    function frameTextForContext(frame) {
+      if (!frame) return "";
+      if (!frame.continuation_after) return frame.text;
+      return frame.text.replace(/-$/, "");
+    }
+
+    function contextWindowBounds() {
+      const current = frameData.frames[state.index];
+      if (current &&
+          Number.isInteger(current.context_start_frame_index) &&
+          Number.isInteger(current.context_end_frame_index)) {
+        return {
+          start: Math.max(0, current.context_start_frame_index),
+          end: Math.min(frameData.frames.length - 1, current.context_end_frame_index)
+        };
+      }
+
+      const currentStart = sentenceStartForFrame(state.index);
+      const currentEnd = sentenceEndForFrame(state.index);
+      const previousStart = previousSentenceStartBefore(currentStart);
+      const nextStart = Math.min(currentEnd + 1, frameData.frames.length - 1);
+      const nextEnd = nextStart > currentEnd ? sentenceEndForFrame(nextStart) : currentEnd;
+      return {
+        start: previousStart,
+        end: Math.max(currentEnd, nextEnd)
+      };
+    }
+
     function renderWord(current, pivot) {
       word.innerHTML = "";
       word.style.setProperty("--word-size", `${baseWordSize}px`);
@@ -992,6 +1064,44 @@
         if (i === pivot) span.className = "orp";
         word.appendChild(span);
       });
+    }
+
+    function renderChapterTitle(title) {
+      readerArea.classList.add("title-card");
+      word.innerHTML = "";
+      word.style.removeProperty("--word-size");
+      word.style.transform = "translateX(-50%)";
+      word.textContent = title;
+    }
+
+    function renderContextView() {
+      const current = frameData.frames[state.index];
+      const currentSourceToken = current ? current.source_token_index : -1;
+      const bounds = contextWindowBounds();
+      readerArea.classList.add("context-view");
+      word.innerHTML = "";
+      word.style.removeProperty("--word-size");
+      word.style.transform = "none";
+
+      const lines = document.createElement("div");
+      lines.className = "context-lines";
+      let lastSourceToken = -1;
+      for (let index = bounds.start; index <= bounds.end; index += 1) {
+        const frame = frameData.frames[index];
+        if (!frame || frame.source_token_index === lastSourceToken) {
+          continue;
+        }
+        lastSourceToken = frame.source_token_index;
+        const span = document.createElement("span");
+        span.className = "context-word";
+        if (frame.source_token_index === currentSourceToken) {
+          span.classList.add("is-current");
+        }
+        span.textContent = frameTextForContext(frame);
+        lines.appendChild(span);
+        lines.appendChild(document.createTextNode(" "));
+      }
+      word.appendChild(lines);
     }
 
     function alignOrpToFixation() {
@@ -1032,7 +1142,6 @@
 
       renderWord(current, centeredIndex(Array.from(current).length));
       readerArea.classList.add("center-fallback");
-      fitStatus.textContent = "centered";
       for (let size = baseWordSize; size >= minWordSize; size -= 2) {
         word.style.setProperty("--word-size", `${size}px`);
         centerWord();
@@ -1045,7 +1154,6 @@
       centerWord();
       if (!fitsReaderArea()) {
         readerArea.classList.add("needs-chunking");
-        fitStatus.textContent = "split needed";
       }
     }
 
@@ -1059,6 +1167,13 @@
       state.sleepTimer = 0;
     }
 
+    function stopDpadHold() {
+      window.clearTimeout(dpadHoldTimer);
+      window.clearInterval(dpadRepeatTimer);
+      dpadHoldTimer = 0;
+      dpadRepeatTimer = 0;
+    }
+
     function sleepScreen() {
       if (state.playing) return;
       stopTimer();
@@ -1069,6 +1184,8 @@
 
     function wakeScreen() {
       state.sleeping = false;
+      state.titleCard = true;
+      state.contextView = false;
       stopSleepTimer();
       render();
       scheduleSleepIfPaused();
@@ -1087,7 +1204,7 @@
       if (state.playing) {
         stopSleepTimer();
       }
-      if (!state.playing) return;
+      if (!state.playing || state.contextView) return;
       state.timer = window.setTimeout(() => {
         if (state.index + 1 >= frameData.frames.length) {
           state.playing = false;
@@ -1096,6 +1213,16 @@
           return;
         }
         state.index += 1;
+        if (isChapterStart(state.index)) {
+          state.titleCard = true;
+          render();
+          state.timer = window.setTimeout(() => {
+            state.titleCard = false;
+            render();
+            scheduleNext();
+          }, chapterTitleDelayMs);
+          return;
+        }
         render();
         scheduleNext();
       }, durationMs());
@@ -1108,16 +1235,53 @@
       });
     }
 
+    function stepWordForDirection(direction) {
+      state.index = direction === "back" ? previousWordFrame() : nextWordFrame();
+      state.playing = false;
+      state.titleCard = false;
+    }
+
+    function startDpadContext(direction) {
+      if (state.sleeping) return;
+      suppressNextDpadClick = direction;
+      stopTimer();
+      stopSleepTimer();
+      state.playing = false;
+      state.titleCard = false;
+      state.contextView = true;
+      stepWordForDirection(direction);
+      render();
+      dpadRepeatTimer = window.setInterval(() => {
+        stepWordForDirection(direction);
+        render();
+      }, 420);
+    }
+
+    function endDpadContext() {
+      const wasContext = state.contextView;
+      stopDpadHold();
+      if (wasContext) {
+        state.contextView = false;
+        render();
+        scheduleSleepIfPaused();
+      }
+    }
+
     function perform(action) {
       pulse(action);
       if (state.sleeping) {
         if (action === "toggle") {
+          suppressNextRedClick = false;
           wakeScreen();
         }
         return;
       }
       if (action === "toggle") {
         if (state.index >= frameData.frames.length - 1 && !state.playing) state.index = 0;
+        if (state.titleCard && !state.playing) {
+          state.titleCard = false;
+        }
+        state.contextView = false;
         state.playing = !state.playing;
         state.sleeping = false;
         render();
@@ -1128,32 +1292,24 @@
       if (action === "back") {
         state.index = previousWordFrame();
         state.playing = false;
+        state.contextView = false;
+        state.titleCard = isChapterStart(state.index);
       } else if (action === "forward") {
         state.index = nextWordFrame();
         state.playing = false;
+        state.contextView = false;
+        state.titleCard = isChapterStart(state.index);
       } else if (action === "faster") {
         state.wpm = Math.min(600, state.wpm + 25);
       } else if (action === "slower") {
         state.wpm = Math.max(100, state.wpm - 25);
-      } else if (action === "sentenceBack") {
-        const currentStart = sentenceStartForFrame(state.index);
-        state.index = state.index === currentStart
-          ? previousSentenceStartBefore(currentStart)
-          : currentStart;
-        state.playing = false;
       } else if (action === "sleep") {
         state.playing = false;
+        state.contextView = false;
         sleepScreen();
         return;
       } else if (action === "menu") {
         return;
-      } else if (action === "longSample") {
-        currentSample = currentSample === "longWords" ? "backend" : "longWords";
-        frameData = currentSample === "longWords"
-          ? buildFrameData(samples.longWords, frameOptions)
-          : backendFrameData || buildFrameData(samples.normal, frameOptions);
-        state.index = 0;
-        state.playing = false;
       }
       render();
       scheduleNext();
@@ -1163,8 +1319,17 @@
     document.addEventListener("click", (event) => {
       const button = event.target.closest("[data-action]");
       if (!button) return;
+      if (button.dataset.action === "toggle" && state.sleeping) {
+        suppressNextRedClick = false;
+        perform("toggle");
+        return;
+      }
       if (button.dataset.action === "toggle" && suppressNextRedClick) {
         suppressNextRedClick = false;
+        return;
+      }
+      if (button.dataset.action === suppressNextDpadClick) {
+        suppressNextDpadClick = "";
         return;
       }
       perform(button.dataset.action);
@@ -1172,22 +1337,34 @@
 
     document.addEventListener("pointerdown", (event) => {
       const redButton = event.target.closest(".round-button.secondary[data-action='toggle']");
-      if (!redButton) return;
-      window.clearTimeout(redHoldTimer);
-      redHoldTimer = window.setTimeout(() => {
-        suppressNextRedClick = true;
-        perform("sentenceBack");
-      }, 550);
+      const dpadButton = event.target.closest(".dpad [data-action='back'], .dpad [data-action='forward']");
+      if (redButton) {
+        redPointerActive = true;
+      }
+      if (dpadButton) {
+        stopDpadHold();
+        const direction = dpadButton.dataset.action;
+        dpadHoldTimer = window.setTimeout(() => {
+          startDpadContext(direction);
+        }, 360);
+      }
     });
 
-    document.addEventListener("pointerup", () => {
-      window.clearTimeout(redHoldTimer);
-      redHoldTimer = 0;
+    document.addEventListener("pointerup", (event) => {
+      const redButton = event.target.closest(".round-button.secondary[data-action='toggle']");
+      if (redButton && redPointerActive) {
+        suppressNextRedClick = true;
+        perform("toggle");
+        redPointerActive = false;
+      } else {
+        redPointerActive = false;
+      }
+      endDpadContext();
     });
 
     document.addEventListener("pointercancel", () => {
-      window.clearTimeout(redHoldTimer);
-      redHoldTimer = 0;
+      redPointerActive = false;
+      endDpadContext();
     });
 
     document.addEventListener("keydown", (event) => {
@@ -1197,10 +1374,6 @@
         ArrowRight: "forward",
         ArrowUp: "faster",
         ArrowDown: "slower",
-        l: "longSample",
-        L: "longSample",
-        r: "sentenceBack",
-        R: "sentenceBack",
         s: "sleep",
         S: "sleep"
       };

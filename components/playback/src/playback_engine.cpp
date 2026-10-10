@@ -224,6 +224,52 @@ std::uint64_t PlaybackEngine::duration_for_index(std::size_t frame_index) const 
     return base;
 }
 
+SentenceContextWindow PlaybackEngine::sentence_context_for_frame(
+    std::size_t frame_index) const {
+    SentenceContextWindow context;
+    if (frames_.empty()) {
+        return context;
+    }
+
+    const auto clamped = std::min(frame_index, frames_.size() - 1);
+    const auto current_start = sentence_start_for_frame(clamped);
+    const auto current_end = sentence_end_for_frame(clamped);
+    const auto previous_start = previous_sentence_start_before(current_start);
+    const auto next_start = std::min(current_end + 1, frames_.size() - 1);
+    const auto next_end = next_start > current_end ? sentence_end_for_frame(next_start)
+                                                   : current_end;
+
+    context.start_frame_index = previous_start;
+    context.end_frame_index = std::max(current_end, next_end);
+    context.current_frame_index = clamped;
+    context.current_source_token_index = frames_[clamped].source_token_index;
+    return context;
+}
+
+SentenceContextWindow PlaybackEngine::current_sentence_context() const {
+    return sentence_context_for_frame(snapshot_.frame_index);
+}
+
+FrameNavigation PlaybackEngine::navigation_for_frame(std::size_t frame_index) const {
+    FrameNavigation navigation;
+    if (frames_.empty()) {
+        return navigation;
+    }
+
+    const auto clamped = std::min(frame_index, frames_.size() - 1);
+    navigation.previous_word_frame_index = previous_word_frame_for_frame(clamped);
+    navigation.next_word_frame_index = next_word_frame_for_frame(clamped);
+    navigation.sentence_rewind_frame_index = sentence_rewind_frame_for_frame(clamped);
+
+    for (const auto& chapter : chapters_) {
+        if (chapter.first_frame_index == clamped) {
+            navigation.starts_chapter = true;
+            break;
+        }
+    }
+    return navigation;
+}
+
 std::uint64_t PlaybackEngine::base_duration_ms() const {
     return ceil_div(60000, static_cast<std::uint64_t>(settings_.wpm));
 }
@@ -245,13 +291,14 @@ std::size_t PlaybackEngine::first_frame_for_source_token(std::size_t source_toke
     return frames_.empty() ? std::size_t{0} : frames_.size() - 1;
 }
 
-std::size_t PlaybackEngine::previous_word_frame() const {
-    if (frames_.empty() || snapshot_.frame_index == 0) {
+std::size_t PlaybackEngine::previous_word_frame_for_frame(std::size_t frame_index) const {
+    if (frames_.empty() || frame_index == 0) {
         return 0;
     }
 
-    const auto current_source = frames_[snapshot_.frame_index].source_token_index;
-    for (std::size_t index = snapshot_.frame_index; index > 0; --index) {
+    const auto clamped = std::min(frame_index, frames_.size() - 1);
+    const auto current_source = frames_[clamped].source_token_index;
+    for (std::size_t index = clamped; index > 0; --index) {
         const auto candidate = index - 1;
         if (frames_[candidate].source_token_index < current_source) {
             return first_frame_for_source_token(frames_[candidate].source_token_index);
@@ -260,18 +307,38 @@ std::size_t PlaybackEngine::previous_word_frame() const {
     return 0;
 }
 
-std::size_t PlaybackEngine::next_word_frame() const {
+std::size_t PlaybackEngine::next_word_frame_for_frame(std::size_t frame_index) const {
     if (frames_.empty()) {
         return 0;
     }
 
-    const auto current_source = frames_[snapshot_.frame_index].source_token_index;
-    for (std::size_t index = snapshot_.frame_index + 1; index < frames_.size(); ++index) {
+    const auto clamped = std::min(frame_index, frames_.size() - 1);
+    const auto current_source = frames_[clamped].source_token_index;
+    for (std::size_t index = clamped + 1; index < frames_.size(); ++index) {
         if (frames_[index].source_token_index > current_source) {
             return first_frame_for_source_token(frames_[index].source_token_index);
         }
     }
     return frames_.size() - 1;
+}
+
+std::size_t PlaybackEngine::sentence_rewind_frame_for_frame(std::size_t frame_index) const {
+    if (frames_.empty()) {
+        return 0;
+    }
+
+    const auto clamped = std::min(frame_index, frames_.size() - 1);
+    const auto current_start = sentence_start_for_frame(clamped);
+    return clamped == current_start ? previous_sentence_start_before(current_start)
+                                    : current_start;
+}
+
+std::size_t PlaybackEngine::previous_word_frame() const {
+    return previous_word_frame_for_frame(snapshot_.frame_index);
+}
+
+std::size_t PlaybackEngine::next_word_frame() const {
+    return next_word_frame_for_frame(snapshot_.frame_index);
 }
 
 std::size_t PlaybackEngine::sentence_start_for_frame(std::size_t frame_index) const {
@@ -288,6 +355,27 @@ std::size_t PlaybackEngine::sentence_start_for_frame(std::size_t frame_index) co
         }
     }
     return 0;
+}
+
+std::size_t PlaybackEngine::sentence_end_for_frame(std::size_t frame_index) const {
+    if (frames_.empty()) {
+        return 0;
+    }
+
+    const auto clamped = std::min(frame_index, frames_.size() - 1);
+    const auto chapter_index = chapter_index_for_frame(clamped);
+    const auto chapter_end = chapters_.empty()
+                                 ? frames_.size()
+                                 : std::min(chapters_[chapter_index].first_frame_index +
+                                                chapters_[chapter_index].frame_count,
+                                            frames_.size());
+    for (std::size_t index = clamped; index < chapter_end; ++index) {
+        if (rsvp::text::has_flag(frames_[index].punctuation_flags,
+                                 rsvp::text::PunctuationFlags::sentence_end)) {
+            return index;
+        }
+    }
+    return chapter_end == 0 ? std::size_t{0} : chapter_end - 1;
 }
 
 std::size_t PlaybackEngine::previous_sentence_start_before(std::size_t frame_index) const {
