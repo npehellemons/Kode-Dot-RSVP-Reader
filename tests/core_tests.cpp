@@ -326,6 +326,73 @@ void test_playback_advances_by_display_frame() {
     require(engine.snapshot().chunk_index == 2, "rewind chunk index");
 }
 
+void test_playback_word_navigation_pauses_and_skips_chunks() {
+    DisplayFrameOptions options;
+    options.max_codepoints_per_frame = 8;
+    auto frames = make_display_frames(tokenize("one supercalifragilistic! three"), options);
+    PlaybackEngine engine(frames, PlaybackSettings{.wpm = 300});
+
+    engine.start(0);
+    require(engine.snapshot().state == PlaybackState::playing,
+            "word navigation fixture starts playing");
+
+    engine.advance_word(0);
+    require(engine.snapshot().state == PlaybackState::paused,
+            "advance word pauses playback");
+    require(engine.snapshot().source_token_index == 1,
+            "advance word reaches next source token");
+    require(engine.snapshot().chunk_index == 0,
+            "advance word lands on first chunk");
+    require(engine.snapshot().visible_frame->text_utf8 == "supercal-",
+            "advance word skips to long word first chunk");
+
+    engine.advance_one(0);
+    require(engine.snapshot().chunk_index == 1, "fixture moves inside long word");
+    engine.advance_word(0);
+    require(engine.snapshot().state == PlaybackState::paused,
+            "advance from chunk pauses playback");
+    require(engine.snapshot().source_token_index == 2,
+            "advance word skips remaining chunks");
+    require(engine.snapshot().visible_frame->text_utf8 == "three",
+            "advance word lands on following word");
+
+    engine.rewind_word(0);
+    require(engine.snapshot().state == PlaybackState::paused,
+            "rewind word pauses playback");
+    require(engine.snapshot().source_token_index == 1,
+            "rewind word reaches previous source token");
+    require(engine.snapshot().chunk_index == 0,
+            "rewind word lands on first chunk of previous word");
+}
+
+void test_playback_sentence_rewind_pauses_and_repeats() {
+    auto frames = make_display_frames(tokenize("First one. Second two. Third three."));
+    PlaybackEngine engine(frames, PlaybackSettings{.wpm = 300});
+
+    engine.seek(5, 0);
+    engine.start(0);
+    require(engine.snapshot().visible_frame->text_utf8 == "three.",
+            "sentence fixture starts inside third sentence");
+
+    engine.rewind_sentence(0);
+    require(engine.snapshot().state == PlaybackState::paused,
+            "sentence rewind pauses playback");
+    require(engine.snapshot().visible_frame->text_utf8 == "Third",
+            "sentence rewind inside sentence lands at current sentence start");
+
+    engine.rewind_sentence(0);
+    require(engine.snapshot().visible_frame->text_utf8 == "Second",
+            "second sentence rewind lands at previous sentence start");
+
+    engine.rewind_sentence(0);
+    require(engine.snapshot().visible_frame->text_utf8 == "First",
+            "third sentence rewind lands at first sentence start");
+
+    engine.rewind_sentence(0);
+    require(engine.snapshot().visible_frame->text_utf8 == "First",
+            "sentence rewind clamps at document start");
+}
+
 std::filesystem::path temp_test_dir(const char* name) {
     const auto dir = std::filesystem::temp_directory_path() /
                      (std::string("kode-rsvp-") + name);
@@ -445,6 +512,8 @@ int main() {
     test_display_frames_chunk_long_tokens();
     test_display_frames_preserve_utf8_boundaries();
     test_playback_advances_by_display_frame();
+    test_playback_word_navigation_pauses_and_skips_chunks();
+    test_playback_sentence_rewind_pauses_and_repeats();
     test_settings_serialization_and_atomic_load();
     test_bookmark_serialization_hash_and_atomic_load();
 

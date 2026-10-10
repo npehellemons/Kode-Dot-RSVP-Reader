@@ -593,8 +593,8 @@
           </div>
 
           <div class="face-buttons">
-            <button class="round-button primary" type="button" data-action="toggle" aria-label="Primary button play pause">▶</button>
-            <button class="round-button secondary" type="button" data-action="restart" aria-label="Secondary button restart">↻</button>
+            <button class="round-button primary" type="button" data-action="menu" aria-label="Blue button reserved for menu">•</button>
+            <button class="round-button secondary" type="button" data-action="toggle" aria-label="Red button play pause">▶</button>
           </div>
         </div>
       </div>
@@ -632,16 +632,16 @@
       </div>
 
       <ul class="control-list">
-        <li><code>Space</code><span>Primary button toggles play and pause.</span></li>
-        <li><code>← / →</code><span>D-pad left and right step one display frame backward or forward.</span></li>
+        <li><code>Space</code><span>Red button toggles play and pause.</span></li>
+        <li><code>← / →</code><span>D-pad left and right step one word and pause playback.</span></li>
         <li><code>↑ / ↓</code><span>D-pad up and down adjust WPM in 25 WPM increments.</span></li>
         <li><code>L</code><span>Toggle a long-word sample for fit and split fallback testing.</span></li>
-        <li><code>R</code><span>Secondary button restarts the bundled sample.</span></li>
+        <li><code>R</code><span>Hold red behavior: jump to the start of the sentence and pause.</span></li>
       </ul>
 
       <div class="sim-actions">
-        <button type="button" data-action="toggle">Play / Pause</button>
-        <button type="button" data-action="restart">Restart</button>
+        <button type="button" data-action="toggle">Red Play / Pause</button>
+        <button type="button" data-action="sentenceBack">Hold Red</button>
         <button type="button" data-action="slower">Slower</button>
         <button type="button" data-action="faster">Faster</button>
         <button type="button" data-action="longSample">Long-word sample</button>
@@ -665,6 +665,8 @@
     let currentSample = "normal";
     let frameData = buildFrameData(samples[currentSample], frameOptions);
     let backendFrameData = null;
+    let redHoldTimer = 0;
+    let suppressNextRedClick = false;
     const state = {
       index: 0,
       wpm: 250,
@@ -845,6 +847,51 @@
       }
     }
 
+    function firstFrameForSourceToken(sourceTokenIndex) {
+      const found = frameData.frames.find((frame) => frame.source_token_index === sourceTokenIndex);
+      return found ? found.index : Math.max(0, frameData.frames.length - 1);
+    }
+
+    function previousWordFrame() {
+      const current = frameData.frames[state.index];
+      if (!current) return 0;
+      for (let index = state.index - 1; index >= 0; index -= 1) {
+        const candidate = frameData.frames[index];
+        if (candidate.source_token_index < current.source_token_index) {
+          return firstFrameForSourceToken(candidate.source_token_index);
+        }
+      }
+      return 0;
+    }
+
+    function nextWordFrame() {
+      const current = frameData.frames[state.index];
+      if (!current) return 0;
+      for (let index = state.index + 1; index < frameData.frames.length; index += 1) {
+        const candidate = frameData.frames[index];
+        if (candidate.source_token_index > current.source_token_index) {
+          return firstFrameForSourceToken(candidate.source_token_index);
+        }
+      }
+      return Math.max(0, frameData.frames.length - 1);
+    }
+
+    function sentenceStartForFrame(frameIndex) {
+      const clamped = Math.min(frameIndex, frameData.frames.length - 1);
+      for (let index = clamped; index > 0; index -= 1) {
+        const previous = frameData.frames[index - 1];
+        if (previous.punctuation_flags.includes("sentence_end")) {
+          return index;
+        }
+      }
+      return 0;
+    }
+
+    function previousSentenceStartBefore(frameIndex) {
+      if (frameIndex <= 0) return 0;
+      return sentenceStartForFrame(frameIndex - 1);
+    }
+
     function renderWord(current, pivot) {
       word.innerHTML = "";
       word.style.setProperty("--word-size", `${baseWordSize}px`);
@@ -949,16 +996,23 @@
         return;
       }
       if (action === "back") {
-        state.index = Math.max(0, state.index - 1);
+        state.index = previousWordFrame();
+        state.playing = false;
       } else if (action === "forward") {
-        state.index = Math.min(frameData.frames.length - 1, state.index + 1);
+        state.index = nextWordFrame();
+        state.playing = false;
       } else if (action === "faster") {
         state.wpm = Math.min(600, state.wpm + 25);
       } else if (action === "slower") {
         state.wpm = Math.max(100, state.wpm - 25);
-      } else if (action === "restart") {
-        state.index = 0;
+      } else if (action === "sentenceBack") {
+        const currentStart = sentenceStartForFrame(state.index);
+        state.index = state.index === currentStart
+          ? previousSentenceStartBefore(currentStart)
+          : currentStart;
         state.playing = false;
+      } else if (action === "menu") {
+        return;
       } else if (action === "longSample") {
         currentSample = currentSample === "longWords" ? "backend" : "longWords";
         frameData = currentSample === "longWords"
@@ -974,7 +1028,31 @@
     document.addEventListener("click", (event) => {
       const button = event.target.closest("[data-action]");
       if (!button) return;
+      if (button.dataset.action === "toggle" && suppressNextRedClick) {
+        suppressNextRedClick = false;
+        return;
+      }
       perform(button.dataset.action);
+    });
+
+    document.addEventListener("pointerdown", (event) => {
+      const redButton = event.target.closest(".round-button.secondary[data-action='toggle']");
+      if (!redButton) return;
+      window.clearTimeout(redHoldTimer);
+      redHoldTimer = window.setTimeout(() => {
+        suppressNextRedClick = true;
+        perform("sentenceBack");
+      }, 550);
+    });
+
+    document.addEventListener("pointerup", () => {
+      window.clearTimeout(redHoldTimer);
+      redHoldTimer = 0;
+    });
+
+    document.addEventListener("pointercancel", () => {
+      window.clearTimeout(redHoldTimer);
+      redHoldTimer = 0;
     });
 
     document.addEventListener("keydown", (event) => {
@@ -986,8 +1064,8 @@
         ArrowDown: "slower",
         l: "longSample",
         L: "longSample",
-        r: "restart",
-        R: "restart"
+        r: "sentenceBack",
+        R: "sentenceBack"
       };
       const action = map[event.key];
       if (!action) return;

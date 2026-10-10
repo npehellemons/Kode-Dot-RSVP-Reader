@@ -59,6 +59,9 @@ public:
     void seek(std::size_t frame_index, std::uint64_t monotonic_ms);
     void rewind_one(std::uint64_t monotonic_ms);
     void advance_one(std::uint64_t monotonic_ms);
+    void rewind_word(std::uint64_t monotonic_ms);
+    void advance_word(std::uint64_t monotonic_ms);
+    void rewind_sentence(std::uint64_t monotonic_ms);
     bool set_wpm(int wpm);
     void set_punctuation_pause_mode(PunctuationPauseMode mode);
 
@@ -70,6 +73,12 @@ public:
 
 private:
     std::uint64_t base_duration_ms() const;
+    void seek_and_pause(std::size_t frame_index, std::uint64_t monotonic_ms);
+    std::size_t first_frame_for_source_token(std::size_t source_token_index) const;
+    std::size_t previous_word_frame() const;
+    std::size_t next_word_frame() const;
+    std::size_t sentence_start_for_frame(std::size_t frame_index) const;
+    std::size_t previous_sentence_start_before(std::size_t frame_index) const;
     void update_visible_token();
     void update_remaining();
     void schedule_next_from(std::uint64_t monotonic_ms);

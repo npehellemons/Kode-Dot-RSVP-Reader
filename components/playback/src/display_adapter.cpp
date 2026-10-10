@@ -59,6 +59,21 @@ bool DisplayAdapter::advance_one(std::uint64_t monotonic_ms) {
     return emit_if_changed();
 }
 
+bool DisplayAdapter::rewind_word(std::uint64_t monotonic_ms) {
+    engine_.rewind_word(monotonic_ms);
+    return emit_if_changed();
+}
+
+bool DisplayAdapter::advance_word(std::uint64_t monotonic_ms) {
+    engine_.advance_word(monotonic_ms);
+    return emit_if_changed();
+}
+
+bool DisplayAdapter::rewind_sentence(std::uint64_t monotonic_ms) {
+    engine_.rewind_sentence(monotonic_ms);
+    return emit_if_changed();
+}
+
 bool DisplayAdapter::set_wpm(int wpm) {
     engine_.set_wpm(wpm);
     return emit_if_changed();

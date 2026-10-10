@@ -308,7 +308,7 @@ void render(const DisplayState& state) {
         "    Remaining: " + std::to_string(remaining_seconds) + "s";
     print_centered(status, size.columns);
     std::cout << '\n';
-    print_centered("Space play/pause   h/l back/forward   j/k WPM   r restart   q quit",
+    print_centered("Space red play/pause   h/l word step   j/k WPM   r hold red sentence   q quit",
                    size.columns);
     std::cout.flush();
 }
@@ -371,12 +371,12 @@ int main() {
                 break;
             case 'h':
             case 'H':
-                adapter.rewind_one(monotonic_ms());
+                adapter.rewind_word(monotonic_ms());
                 save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'l':
             case 'L':
-                adapter.advance_one(monotonic_ms());
+                adapter.advance_word(monotonic_ms());
                 save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'j':
@@ -391,7 +391,7 @@ int main() {
                 break;
             case 'r':
             case 'R':
-                adapter.restart(monotonic_ms());
+                adapter.rewind_sentence(monotonic_ms());
                 save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
                 break;
             case 'q':

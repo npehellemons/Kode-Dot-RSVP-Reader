@@ -29,6 +29,9 @@ public:
     bool seek(std::size_t token_index, std::uint64_t monotonic_ms);
     bool rewind_one(std::uint64_t monotonic_ms);
     bool advance_one(std::uint64_t monotonic_ms);
+    bool rewind_word(std::uint64_t monotonic_ms);
+    bool advance_word(std::uint64_t monotonic_ms);
+    bool rewind_sentence(std::uint64_t monotonic_ms);
     bool set_wpm(int wpm);
     bool tick(std::uint64_t monotonic_ms);
 
