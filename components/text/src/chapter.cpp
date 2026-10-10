@@ -139,38 +139,60 @@ std::size_t first_frame_at_or_after(const std::vector<DisplayFrame>& frames,
 std::vector<Chapter> make_single_chapter(
     const std::vector<DisplayFrame>& frames,
     std::string title) {
-    Chapter chapter;
+    return make_frame_chapters(make_single_source_chapter("", std::move(title)), frames);
+}
+
+std::vector<SourceChapter> make_single_source_chapter(
+    std::string_view source,
+    std::string title) {
+    SourceChapter chapter;
     chapter.title = std::move(title);
-    chapter.first_frame_index = 0;
-    chapter.frame_count = frames.size();
-    if (!frames.empty()) {
-        chapter.source_byte_start = frames.front().source_byte_start;
-        const auto& last = frames.back();
-        chapter.source_byte_length =
-            last.source_byte_start + last.source_byte_length - chapter.source_byte_start;
-    }
+    chapter.source_byte_start = 0;
+    chapter.source_byte_length = source.size();
     return {chapter};
 }
 
-std::vector<Chapter> make_chapters_from_markdown_headings(
+std::vector<SourceChapter> make_source_chapters_from_headings(
     std::string_view source,
-    const std::vector<DisplayFrame>& frames,
     std::string fallback_title) {
     auto headings = headings_from_source(source);
     if (headings.empty()) {
-        return make_single_chapter(frames, std::move(fallback_title));
+        return make_single_source_chapter(source, std::move(fallback_title));
     }
 
     if (headings.front().byte_start > 0 && !headings.front().skip_front_matter) {
         headings.insert(headings.begin(), {std::move(fallback_title), 0, false});
     }
 
-    std::vector<Chapter> chapters;
+    std::vector<SourceChapter> chapters;
     chapters.reserve(headings.size());
     for (std::size_t index = 0; index < headings.size(); ++index) {
         const auto source_start = headings[index].byte_start;
         const auto source_end =
             index + 1 < headings.size() ? headings[index + 1].byte_start : source.size();
+
+        SourceChapter chapter;
+        chapter.title = headings[index].title;
+        chapter.source_byte_start = source_start;
+        chapter.source_byte_length = source_end - source_start;
+        chapters.push_back(std::move(chapter));
+    }
+
+    if (chapters.empty()) {
+        return make_single_source_chapter(source, std::move(fallback_title));
+    }
+    return chapters;
+}
+
+std::vector<Chapter> make_frame_chapters(
+    const std::vector<SourceChapter>& source_chapters,
+    const std::vector<DisplayFrame>& frames) {
+    std::vector<Chapter> chapters;
+    chapters.reserve(source_chapters.size());
+
+    for (const auto& source_chapter : source_chapters) {
+        const auto source_start = source_chapter.source_byte_start;
+        const auto source_end = source_start + source_chapter.source_byte_length;
         const auto first_frame = first_frame_at_or_after(frames, source_start);
         const auto next_frame = first_frame_at_or_after(frames, source_end);
         if (first_frame >= next_frame) {
@@ -178,18 +200,36 @@ std::vector<Chapter> make_chapters_from_markdown_headings(
         }
 
         Chapter chapter;
-        chapter.title = headings[index].title;
+        chapter.title = source_chapter.title;
         chapter.source_byte_start = source_start;
-        chapter.source_byte_length = source_end - source_start;
+        chapter.source_byte_length = source_chapter.source_byte_length;
         chapter.first_frame_index = first_frame;
         chapter.frame_count = next_frame - first_frame;
         chapters.push_back(std::move(chapter));
     }
 
     if (chapters.empty()) {
-        return make_single_chapter(frames, std::move(fallback_title));
+        Chapter chapter;
+        chapter.title = source_chapters.empty() ? "Document" : source_chapters.front().title;
+        chapter.first_frame_index = 0;
+        chapter.frame_count = frames.size();
+        if (!frames.empty()) {
+            chapter.source_byte_start = frames.front().source_byte_start;
+            const auto& last = frames.back();
+            chapter.source_byte_length =
+                last.source_byte_start + last.source_byte_length - chapter.source_byte_start;
+        }
+        return {chapter};
     }
     return chapters;
+}
+
+std::vector<Chapter> make_chapters_from_markdown_headings(
+    std::string_view source,
+    const std::vector<DisplayFrame>& frames,
+    std::string fallback_title) {
+    return make_frame_chapters(
+        make_source_chapters_from_headings(source, std::move(fallback_title)), frames);
 }
 
 } // namespace rsvp::text

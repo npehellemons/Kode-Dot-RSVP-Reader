@@ -1,4 +1,5 @@
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
+#include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
 #include "rsvp/storage/state_store.hpp"
@@ -27,6 +28,12 @@ using rsvp::lifecycle::capture_reader_state;
 using rsvp::lifecycle::pause_and_persist_for_sleep;
 using rsvp::lifecycle::resolve_bookmark_frame;
 using rsvp::lifecycle::to_playback_settings;
+using rsvp::library::ChapterSource;
+using rsvp::library::DocumentFormat;
+using rsvp::library::MetadataConfidence;
+using rsvp::library::TxtImportOptions;
+using rsvp::library::import_txt_document;
+using rsvp::library::make_frame_chapters;
 using rsvp::storage::BookmarkV1;
 using rsvp::storage::FixationMode;
 using rsvp::storage::PunctuationMode;
@@ -333,6 +340,92 @@ void test_chapters_from_gutenberg_roman_headings() {
             "gutenberg contents preface is not a chapter");
     require(chapters[1].first_frame_index > chapters[0].first_frame_index,
             "second gutenberg chapter starts later");
+}
+
+void test_txt_import_extracts_metadata_and_headings() {
+    const std::string source =
+        "Title: Example Book\n"
+        "Author: Example Writer\n\n"
+        "# Chapter One\n"
+        "Alpha beta.\n\n"
+        "# Chapter Two\n"
+        "Gamma delta.";
+
+    const auto document =
+        import_txt_document(source, "/books/Fallback Writer - Fallback Title.txt");
+    require(document.format == DocumentFormat::txt, "txt import format");
+    require(document.title == "Example Book", "txt import explicit title");
+    require(document.author == "Example Writer", "txt import explicit author");
+    require(document.metadata_confidence == MetadataConfidence::explicit_metadata,
+            "txt import explicit metadata confidence");
+    require(document.chapter_source == ChapterSource::explicit_headings,
+            "txt import explicit chapter source");
+    require(document.chapters.size() == 2, "txt import heading chapter count");
+    require(document.chapters[0].title == "Chapter One", "txt import first heading title");
+    require(document.chapters[1].title == "Chapter Two", "txt import second heading title");
+    require(document.normalized_text_utf8 == source, "txt import preserves text");
+
+    const auto reading_tokens = tokenize(document.reading_text_utf8);
+    require(!reading_tokens.empty(), "txt import reading text has body tokens");
+    require(reading_tokens.front().text_utf8 == "Alpha",
+            "txt import reading text skips metadata and heading");
+}
+
+void test_txt_import_uses_filename_fallback() {
+    TxtImportOptions options;
+    options.target_chunk_words = 100;
+    const auto document =
+        import_txt_document("Plain text without headings.", "/books/Arthur - Sample.txt",
+                            options);
+
+    require(document.title == "Sample", "txt import filename title");
+    require(document.author == "Arthur", "txt import filename author");
+    require(document.metadata_confidence == MetadataConfidence::filename_convention,
+            "txt import filename confidence");
+    require(document.chapter_source == ChapterSource::single_fallback,
+            "txt import single fallback chapter source");
+    require(document.chapters.size() == 1, "txt import single fallback chapter count");
+    require(document.chapters[0].title == "Sample", "txt import fallback chapter title");
+}
+
+void test_txt_import_auto_chunks_long_plain_text() {
+    TxtImportOptions options;
+    options.target_chunk_words = 4;
+    const std::string source =
+        "one two three four\n"
+        "five six seven eight\n"
+        "nine ten eleven twelve";
+
+    const auto document = import_txt_document(source, "Long Plain.txt", options);
+    require(document.chapter_source == ChapterSource::auto_chunked,
+            "txt import auto chunk chapter source");
+    require(document.chapters.size() == 3, "txt import auto chunk count");
+    require(document.chapters[0].title == "Part 1", "txt import first chunk title");
+    require(document.chapters[1].source_byte_start ==
+                document.chapters[0].source_byte_start +
+                    document.chapters[0].source_byte_length,
+            "txt import chunks are contiguous");
+    require(document.chapters[2].source_byte_start +
+                document.chapters[2].source_byte_length ==
+                source.size(),
+            "txt import final chunk reaches end");
+}
+
+void test_document_text_frame_chapter_mapping() {
+    const std::string source = "# One\nAlpha beta.\n# Two\nGamma delta.";
+    const auto document = import_txt_document(source);
+    const auto frames = make_display_frames(tokenize(document.reading_text_utf8));
+    const auto chapters = make_frame_chapters(document, frames);
+
+    require(chapters.size() == 2, "document text frame chapter count");
+    require(chapters[0].title == "One", "document text first frame chapter title");
+    require(chapters[1].title == "Two", "document text second frame chapter title");
+    require(frames[chapters[0].first_frame_index].text_utf8 == "Alpha",
+            "document text first chapter starts at body text");
+    require(frames[chapters[1].first_frame_index].text_utf8 == "Gamma",
+            "document text second chapter starts at body text");
+    require(chapters[1].first_frame_index > chapters[0].first_frame_index,
+            "document text second frame chapter starts later");
 }
 
 void test_playback_advances_by_display_frame() {
@@ -687,6 +780,10 @@ int main() {
     test_display_frames_preserve_utf8_boundaries();
     test_chapters_from_markdown_headings();
     test_chapters_from_gutenberg_roman_headings();
+    test_txt_import_extracts_metadata_and_headings();
+    test_txt_import_uses_filename_fallback();
+    test_txt_import_auto_chunks_long_plain_text();
+    test_document_text_frame_chapter_mapping();
     test_playback_advances_by_display_frame();
     test_playback_exposes_chapter_progress_and_remaining_time();
     test_playback_word_navigation_pauses_and_skips_chunks();

@@ -17,6 +17,24 @@ struct Chapter {
     std::size_t frame_count = 0;
 };
 
+struct SourceChapter {
+    std::string title;
+    std::size_t source_byte_start = 0;
+    std::size_t source_byte_length = 0;
+};
+
+std::vector<SourceChapter> make_single_source_chapter(
+    std::string_view source,
+    std::string title = "Document");
+
+std::vector<SourceChapter> make_source_chapters_from_headings(
+    std::string_view source,
+    std::string fallback_title = "Document");
+
+std::vector<Chapter> make_frame_chapters(
+    const std::vector<SourceChapter>& source_chapters,
+    const std::vector<DisplayFrame>& frames);
+
 std::vector<Chapter> make_single_chapter(
     const std::vector<DisplayFrame>& frames,
     std::string title = "Document");

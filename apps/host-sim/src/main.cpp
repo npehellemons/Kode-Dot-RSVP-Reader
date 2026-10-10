@@ -1,7 +1,7 @@
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
+#include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/storage/state_store.hpp"
-#include "rsvp/text/chapter.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
@@ -35,10 +35,11 @@ using rsvp::lifecycle::pause_and_persist_for_sleep;
 using rsvp::lifecycle::persist_reader_state;
 using rsvp::lifecycle::resolve_bookmark_frame;
 using rsvp::lifecycle::to_playback_settings;
+using rsvp::library::import_txt_document;
+using rsvp::library::make_frame_chapters;
 using rsvp::storage::content_hash;
 using rsvp::storage::load_bookmark;
 using rsvp::storage::load_settings;
-using rsvp::text::make_chapters_from_markdown_headings;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
 
@@ -279,16 +280,17 @@ int main() {
     TerminalMode terminal_mode;
 
     const auto dir = state_dir();
-    const auto source_hash = content_hash(kSampleText);
+    const auto preview_document =
+        import_txt_document(kSampleText, "Kode Dot RSVP Reader - Preview.txt");
+    const auto source_hash = content_hash(preview_document.normalized_text_utf8);
     const DocumentIdentity document{kDocId, source_hash};
     const ReaderStatePaths state_paths{dir / "settings.state", dir / "bookmark.state"};
     const auto stored_settings = load_settings(dir / "settings.state");
     const auto playback_settings =
         stored_settings ? to_playback_settings(*stored_settings) : PlaybackSettings{};
-    const auto tokens = tokenize(kSampleText);
+    const auto tokens = tokenize(preview_document.reading_text_utf8);
     auto frames = make_display_frames(tokens);
-    auto chapters = make_chapters_from_markdown_headings(kSampleText, frames,
-                                                         "Preview");
+    auto chapters = make_frame_chapters(preview_document, frames);
 
     DisplayAdapter adapter(
         frames, chapters, playback_settings,
