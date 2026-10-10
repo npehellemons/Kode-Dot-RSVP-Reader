@@ -35,6 +35,11 @@ add_executable(rsvp_host_preview
 )
 target_link_libraries(rsvp_host_preview PRIVATE rsvp_playback rsvp_storage)
 
+add_executable(rsvp_frame_dump
+    tools/rsvp_frame_dump.cpp
+)
+target_link_libraries(rsvp_frame_dump PRIVATE rsvp_text)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(rsvp_core_tests

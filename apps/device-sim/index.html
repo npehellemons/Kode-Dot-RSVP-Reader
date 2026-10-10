@@ -633,7 +633,7 @@
 
       <ul class="control-list">
         <li><code>Space</code><span>Primary button toggles play and pause.</span></li>
-        <li><code>← / →</code><span>D-pad left and right step one token backward or forward.</span></li>
+        <li><code>← / →</code><span>D-pad left and right step one display frame backward or forward.</span></li>
         <li><code>↑ / ↓</code><span>D-pad up and down adjust WPM in 25 WPM increments.</span></li>
         <li><code>L</code><span>Toggle a long-word sample for fit and split fallback testing.</span></li>
         <li><code>R</code><span>Secondary button restarts the bundled sample.</span></li>
@@ -656,8 +656,13 @@
       normal: "Welcome to the Kode Dot RSVP Reader. This simulator keeps the actual screen resolution visible while we refine layout, controls, pacing, and saved reading state before using real device APIs.",
       longWords: "Fit comfortable counterrevolutionaries incomprehensibilities pneumonoultramicroscopicsilicovolcanoconiosis antidisestablishmentarianism supercalifragilisticexpialidocious end."
     };
+    const frameOptions = {
+      schema: "rsvp-display-frames-v1",
+      max_codepoints_per_frame: 16
+    };
+    const encoder = new TextEncoder();
     let currentSample = "normal";
-    let tokens = samples[currentSample].trim().split(/\s+/);
+    let frameData = buildFrameData(samples[currentSample], frameOptions);
     const state = {
       index: 0,
       wpm: 250,
@@ -677,52 +682,139 @@
     const minWordSize = 28;
 
     function durationMs() {
-      const current = tokens[state.index] || "";
+      const current = frameData.frames[state.index];
       const base = Math.ceil(60000 / state.wpm);
-      if (/[.!?]$/.test(current)) return base * 2;
-      if (/[,;:]$/.test(current)) return Math.ceil(base * 1.5);
+      if (!current) return base;
+      if (current.punctuation_flags.includes("sentence_end")) return base * 2;
+      if (current.punctuation_flags.includes("comma")) return Math.ceil(base * 1.5);
       return base;
     }
 
     function render() {
-      const current = tokens[state.index] || "";
+      const current = frameData.frames[state.index];
+      const currentText = current ? current.text : "";
       readerArea.classList.remove("needs-chunking", "center-fallback");
       fitStatus.textContent = "";
-      renderWord(current, orpIndex(current.length));
+      renderWord(currentText, current ? current.orp_codepoint_index : 0);
+      if (current && current.centered_fallback) {
+        readerArea.classList.add("center-fallback");
+        fitStatus.textContent = current.chunk_count > 1
+          ? `${current.chunk_index + 1}/${current.chunk_count}`
+          : "centered";
+      }
       wpm.textContent = `${state.wpm} WPM`;
-      position.textContent = `${Math.min(state.index + 1, tokens.length)}/${tokens.length}`;
-      const pct = tokens.length <= 1 ? 100 : Math.round((state.index / (tokens.length - 1)) * 100);
+      position.textContent = `${Math.min(state.index + 1, frameData.frames.length)}/${frameData.frames.length}`;
+      const pct = frameData.frames.length <= 1 ? 100 : Math.round((state.index / (frameData.frames.length - 1)) * 100);
       progressFill.style.width = `${pct}%`;
       progress.setAttribute("aria-valuenow", String(pct));
       document.querySelector('[data-action="toggle"].round-button').textContent = state.playing ? "Ⅱ" : "▶";
-      const remainingTokens = Math.max(0, tokens.length - state.index - 1);
-      const remainingSeconds = Math.ceil((remainingTokens * (60000 / state.wpm)) / 1000);
+      const remainingFrames = Math.max(0, frameData.frames.length - state.index - 1);
+      const remainingSeconds = Math.ceil((remainingFrames * (60000 / state.wpm)) / 1000);
       remaining.textContent = `0:${String(remainingSeconds).padStart(2, "0")}`;
       fitWordToScreen(current);
     }
 
-    function orpIndex(length) {
-      if (length <= 1) return 0;
-      if (length <= 5) return 1;
-      if (length <= 9) return 2;
-      if (length <= 13) return 3;
+    function utf8ByteLength(text) {
+      return encoder.encode(text).length;
+    }
+
+    function punctuationFlags(text, paragraphBreakBefore) {
+      const flags = [];
+      if (/[,;:]$/.test(text)) flags.push("comma");
+      if (/[.!?]$/.test(text)) flags.push("sentence_end");
+      if (paragraphBreakBefore) flags.push("paragraph_break_before");
+      return flags;
+    }
+
+    function orpIndex(codepointCount) {
+      if (codepointCount <= 1) return 0;
+      if (codepointCount <= 5) return 1;
+      if (codepointCount <= 9) return 2;
+      if (codepointCount <= 13) return 3;
       return 4;
     }
 
-    function centeredIndex(length) {
-      return Math.max(0, Math.floor((length - 1) / 2));
+    function centeredIndex(codepointCount) {
+      return Math.max(0, Math.floor((codepointCount - 1) / 2));
+    }
+
+    function tokenizeForFrames(source) {
+      const tokens = [];
+      const matches = source.matchAll(/\S+/gu);
+      for (const match of matches) {
+        const text = match[0];
+        const prefix = source.slice(0, match.index);
+        const paragraphBreakBefore = /\n\s*\n/.test(prefix.slice(-4));
+        tokens.push({
+          text,
+          source_byte_start: utf8ByteLength(prefix),
+          source_byte_length: utf8ByteLength(text),
+          punctuation_flags: punctuationFlags(text, paragraphBreakBefore)
+        });
+      }
+      return tokens;
+    }
+
+    function buildFrameData(source, options) {
+      const frames = [];
+      const tokens = tokenizeForFrames(source);
+      for (let sourceTokenIndex = 0; sourceTokenIndex < tokens.length; sourceTokenIndex += 1) {
+        const token = tokens[sourceTokenIndex];
+        const codepoints = Array.from(token.text);
+        const split = codepoints.length > options.max_codepoints_per_frame;
+        const chunkCount = split
+          ? Math.ceil(codepoints.length / options.max_codepoints_per_frame)
+          : 1;
+        let tokenByteOffset = 0;
+
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+          const firstCodepoint = chunkIndex * options.max_codepoints_per_frame;
+          const visibleCodepoints = split
+            ? codepoints.slice(firstCodepoint, firstCodepoint + options.max_codepoints_per_frame)
+            : codepoints;
+          const sourceText = visibleCodepoints.join("");
+          const continuationAfter = chunkIndex + 1 < chunkCount;
+          const frameText = continuationAfter ? `${sourceText}-` : sourceText;
+          const sourceByteLength = utf8ByteLength(sourceText);
+
+          frames.push({
+            index: frames.length,
+            text: frameText,
+            source_token_index: sourceTokenIndex,
+            chunk_index: chunkIndex,
+            chunk_count: chunkCount,
+            source_byte_start: token.source_byte_start + tokenByteOffset,
+            source_byte_length: sourceByteLength,
+            orp_codepoint_index: split
+              ? centeredIndex(Array.from(frameText).length)
+              : orpIndex(codepoints.length),
+            centered_fallback: split,
+            continuation_before: chunkIndex > 0,
+            continuation_after: continuationAfter,
+            punctuation_flags: chunkIndex + 1 === chunkCount ? token.punctuation_flags : []
+          });
+
+          tokenByteOffset += sourceByteLength;
+        }
+      }
+
+      return {
+        schema: options.schema,
+        max_codepoints_per_frame: options.max_codepoints_per_frame,
+        frames
+      };
     }
 
     function renderWord(current, pivot) {
       word.innerHTML = "";
       word.style.setProperty("--word-size", `${baseWordSize}px`);
       word.style.transform = "translateX(0)";
-      for (let i = 0; i < current.length; i += 1) {
+      Array.from(current).forEach((letter, i) => {
         const span = document.createElement("span");
-        span.textContent = current[i];
+        span.textContent = letter;
         if (i === pivot) span.className = "orp";
         word.appendChild(span);
-      }
+      });
     }
 
     function alignOrpToFixation() {
@@ -745,17 +837,23 @@
       word.style.transform = "translateX(-50%)";
     }
 
-    function fitWordToScreen(current) {
+    function fitWordToScreen(frame) {
+      if (!frame) return;
+      const current = frame.text;
       for (let size = baseWordSize; size >= minWordSize; size -= 2) {
         word.style.setProperty("--word-size", `${size}px`);
-        word.style.transform = "translateX(0)";
-        alignOrpToFixation();
+        if (frame.centered_fallback) {
+          centerWord();
+        } else {
+          word.style.transform = "translateX(0)";
+          alignOrpToFixation();
+        }
         if (fitsReaderArea()) {
           return;
         }
       }
 
-      renderWord(current, centeredIndex(current.length));
+      renderWord(current, centeredIndex(Array.from(current).length));
       readerArea.classList.add("center-fallback");
       fitStatus.textContent = "centered";
       for (let size = baseWordSize; size >= minWordSize; size -= 2) {
@@ -783,7 +881,7 @@
       stopTimer();
       if (!state.playing) return;
       state.timer = window.setTimeout(() => {
-        if (state.index + 1 >= tokens.length) {
+        if (state.index + 1 >= frameData.frames.length) {
           state.playing = false;
           render();
           return;
@@ -804,7 +902,7 @@
     function perform(action) {
       pulse(action);
       if (action === "toggle") {
-        if (state.index >= tokens.length - 1 && !state.playing) state.index = 0;
+        if (state.index >= frameData.frames.length - 1 && !state.playing) state.index = 0;
         state.playing = !state.playing;
         render();
         scheduleNext();
@@ -813,7 +911,7 @@
       if (action === "back") {
         state.index = Math.max(0, state.index - 1);
       } else if (action === "forward") {
-        state.index = Math.min(tokens.length - 1, state.index + 1);
+        state.index = Math.min(frameData.frames.length - 1, state.index + 1);
       } else if (action === "faster") {
         state.wpm = Math.min(600, state.wpm + 25);
       } else if (action === "slower") {
@@ -823,7 +921,7 @@
         state.playing = false;
       } else if (action === "longSample") {
         currentSample = currentSample === "normal" ? "longWords" : "normal";
-        tokens = samples[currentSample].trim().split(/\s+/);
+        frameData = buildFrameData(samples[currentSample], frameOptions);
         state.index = 0;
         state.playing = false;
       }
