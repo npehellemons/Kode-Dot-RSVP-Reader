@@ -280,6 +280,52 @@ void test_display_frames_preserve_utf8_boundaries() {
     require(frames[1].source_byte_length == 3, "utf8 final chunk source length");
 }
 
+void test_playback_advances_by_display_frame() {
+    DisplayFrameOptions options;
+    options.max_codepoints_per_frame = 8;
+    auto frames = make_display_frames(tokenize("supercalifragilistic! done"), options);
+    PlaybackEngine engine(frames, PlaybackSettings{.wpm = 300});
+
+    require(engine.snapshot().frame_count == 4, "playback frame count includes chunks");
+    require(engine.snapshot().token_count == 4, "legacy token count mirrors frame count");
+    require(engine.snapshot().visible_frame.has_value(), "initial visible frame exists");
+    require(engine.snapshot().visible_frame->text_utf8 == "supercal-",
+            "initial visible frame text");
+    require(engine.snapshot().visible_token->text_utf8 == "supercal-",
+            "legacy visible token mirrors frame text");
+    require(engine.snapshot().source_token_index == 0, "initial source token index");
+    require(engine.snapshot().chunk_index == 0, "initial chunk index");
+    require(engine.snapshot().chunk_count == 3, "initial chunk count");
+    require(engine.snapshot().visible_frame->centered_fallback,
+            "chunked frame uses centered fallback");
+
+    engine.start(0);
+    require(engine.tick(200), "first frame tick advances");
+    require(engine.snapshot().frame_index == 1, "playback frame index advances");
+    require(engine.snapshot().visible_frame->text_utf8 == "ifragili-",
+            "second chunk visible");
+    require(engine.snapshot().source_token_index == 0, "second chunk source token index");
+    require(engine.snapshot().chunk_index == 1, "second chunk index");
+
+    require(engine.tick(400), "second frame tick advances");
+    require(engine.snapshot().visible_frame->text_utf8 == "stic!",
+            "final chunk visible");
+    require(has_flag(engine.snapshot().visible_frame->punctuation_flags,
+                     PunctuationFlags::sentence_end),
+            "final chunk carries punctuation in playback");
+
+    require(engine.duration_for_index(2) == 400, "final sentence chunk duration");
+    require(engine.duration_for_index(3) == 200, "plain next token duration");
+
+    engine.advance_one(400);
+    require(engine.snapshot().frame_index == 3, "manual advance reaches next token frame");
+    require(engine.snapshot().source_token_index == 1, "next token source index");
+    require(engine.snapshot().visible_frame->text_utf8 == "done", "next token text");
+    engine.rewind_one(400);
+    require(engine.snapshot().frame_index == 2, "rewind returns to final chunk");
+    require(engine.snapshot().chunk_index == 2, "rewind chunk index");
+}
+
 std::filesystem::path temp_test_dir(const char* name) {
     const auto dir = std::filesystem::temp_directory_path() /
                      (std::string("kode-rsvp-") + name);
@@ -335,6 +381,9 @@ void test_bookmark_serialization_hash_and_atomic_load() {
     bookmark.content_hash = hash;
     bookmark.source_byte_offset = 42;
     bookmark.token_index = 7;
+    bookmark.frame_index = 8;
+    bookmark.source_token_index = 5;
+    bookmark.chunk_index = 2;
     bookmark.updated_at = 123456;
 
     const auto parsed = parse_bookmark(serialize_bookmark(bookmark));
@@ -343,6 +392,9 @@ void test_bookmark_serialization_hash_and_atomic_load() {
     require(parsed->content_hash == hash, "bookmark hash round trip");
     require(parsed->source_byte_offset == 42, "bookmark source offset round trip");
     require(parsed->token_index == 7, "bookmark token index round trip");
+    require(parsed->frame_index == 8, "bookmark frame index round trip");
+    require(parsed->source_token_index == 5, "bookmark source token round trip");
+    require(parsed->chunk_index == 2, "bookmark chunk index round trip");
     require(parsed->updated_at == 123456, "bookmark updated time round trip");
 
     const auto dir = temp_test_dir("bookmark");
@@ -351,7 +403,20 @@ void test_bookmark_serialization_hash_and_atomic_load() {
     const auto loaded = load_bookmark(path);
     require(loaded.has_value(), "bookmark atomic load succeeds");
     require(loaded->token_index == 7, "loaded bookmark token index");
+    require(loaded->frame_index == 8, "loaded bookmark frame index");
     require(!std::filesystem::exists(path.string() + ".tmp"), "bookmark temp file removed");
+
+    const auto legacy = parse_bookmark(
+        "schema_version=1\n"
+        "doc_id=bundled-sample\n"
+        "content_hash=0123456789abcdef\n"
+        "source_byte_offset=10\n"
+        "token_index=3\n"
+        "updated_at=99\n");
+    require(legacy.has_value(), "legacy bookmark without frame fields parses");
+    require(legacy->frame_index == 3, "legacy bookmark frame falls back to token");
+    require(legacy->source_token_index == 3, "legacy bookmark source token falls back");
+    require(legacy->chunk_index == 0, "legacy bookmark chunk defaults to first chunk");
 
     {
         std::ofstream corrupt(path, std::ios::binary | std::ios::trunc);
@@ -379,6 +444,7 @@ int main() {
     test_display_frames_without_chunking();
     test_display_frames_chunk_long_tokens();
     test_display_frames_preserve_utf8_boundaries();
+    test_playback_advances_by_display_frame();
     test_settings_serialization_and_atomic_load();
     test_bookmark_serialization_hash_and_atomic_load();
 

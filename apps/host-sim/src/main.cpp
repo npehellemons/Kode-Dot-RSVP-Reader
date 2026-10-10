@@ -1,5 +1,6 @@
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/storage/state_store.hpp"
+#include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
 #include <chrono>
@@ -13,6 +14,7 @@
 #include <string>
 #include <thread>
 
+#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
@@ -32,6 +34,8 @@ using rsvp::storage::load_bookmark;
 using rsvp::storage::load_settings;
 using rsvp::storage::save_bookmark_atomic;
 using rsvp::storage::save_settings_atomic;
+using rsvp::text::DisplayFrame;
+using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
 
 constexpr const char* kDocId = "bundled-sample-preview";
@@ -46,6 +50,11 @@ volatile std::sig_atomic_t interrupted = 0;
 void handle_signal(int) {
     interrupted = 1;
 }
+
+struct TerminalSize {
+    int columns = 80;
+    int rows = 24;
+};
 
 class TerminalMode {
 public:
@@ -157,11 +166,41 @@ BookmarkV1 bookmark_from_display(const DisplayState& state,
     BookmarkV1 bookmark;
     bookmark.doc_id = kDocId;
     bookmark.content_hash = source_hash;
-    bookmark.token_index = state.token_index;
+    bookmark.token_index = state.frame_index;
+    bookmark.frame_index = state.frame_index;
+    bookmark.source_token_index = state.source_token_index;
+    bookmark.chunk_index = state.chunk_index;
     bookmark.source_byte_offset =
-        state.visible_token ? state.visible_token->source_byte_start : 0;
+        state.visible_frame ? state.visible_frame->source_byte_start : 0;
     bookmark.updated_at = wall_time_seconds();
     return bookmark;
+}
+
+std::size_t bookmark_frame_index(const BookmarkV1& bookmark,
+                                 const std::vector<DisplayFrame>& frames) {
+    if (bookmark.frame_index < frames.size()) {
+        const auto& frame = frames[bookmark.frame_index];
+        if (frame.source_token_index == bookmark.source_token_index &&
+            frame.chunk_index == bookmark.chunk_index) {
+            return bookmark.frame_index;
+        }
+    }
+
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        const auto& frame = frames[index];
+        if (frame.source_token_index == bookmark.source_token_index &&
+            frame.chunk_index == bookmark.chunk_index) {
+            return index;
+        }
+    }
+
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        if (frames[index].source_byte_start >= bookmark.source_byte_offset) {
+            return index;
+        }
+    }
+
+    return frames.empty() ? std::size_t{0} : frames.size() - 1;
 }
 
 void save_preview_state(const std::filesystem::path& dir,
@@ -170,6 +209,15 @@ void save_preview_state(const std::filesystem::path& dir,
                         std::uint64_t source_hash) {
     save_settings_atomic(dir / "settings.state", settings_from_playback(playback_settings));
     save_bookmark_atomic(dir / "bookmark.state", bookmark_from_display(state, source_hash));
+}
+
+TerminalSize terminal_size() {
+    winsize size{};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0 &&
+        size.ws_col > 0 && size.ws_row > 0) {
+        return {size.ws_col, size.ws_row};
+    }
+    return {};
 }
 
 const char* state_label(PlaybackState state) {
@@ -190,20 +238,78 @@ void clear_screen() {
     std::cout << "\x1b[2J\x1b[H";
 }
 
+std::string repeat(char ch, int count) {
+    if (count <= 0) {
+        return {};
+    }
+    return std::string(static_cast<std::size_t>(count), ch);
+}
+
+std::string truncate_to_columns(const std::string& text, int columns) {
+    if (columns <= 0 || static_cast<int>(text.size()) <= columns) {
+        return text;
+    }
+    if (columns <= 3) {
+        return text.substr(0, static_cast<std::size_t>(columns));
+    }
+    return text.substr(0, static_cast<std::size_t>(columns - 3)) + "...";
+}
+
+void print_centered(const std::string& text, int columns) {
+    const auto clamped = truncate_to_columns(text, columns);
+    const int padding = (columns - static_cast<int>(clamped.size())) / 2;
+    std::cout << repeat(' ', padding) << clamped << '\n';
+}
+
+std::string progress_bar(std::size_t index, std::size_t count, int width) {
+    if (width <= 2) {
+        return "[]";
+    }
+
+    const int inner_width = width - 2;
+    int filled = 0;
+    if (count > 0) {
+        const auto completed = index + 1;
+        filled = static_cast<int>((completed * static_cast<std::size_t>(inner_width)) / count);
+    }
+    if (filled < 0) {
+        filled = 0;
+    }
+    if (filled > inner_width) {
+        filled = inner_width;
+    }
+    return "[" + repeat('#', filled) + repeat('-', inner_width - filled) + "]";
+}
+
 void render(const DisplayState& state) {
     clear_screen();
 
+    const auto size = terminal_size();
     const auto word = state.visible_token ? state.visible_token->text_utf8 : std::string{};
     const auto shown_index = state.token_count == 0 ? 0 : state.token_index + 1;
     const auto remaining_seconds = (state.estimated_remaining_ms + 999) / 1000;
+    const int content_width = size.columns > 10 ? size.columns - 4 : size.columns;
+    const int top_padding = size.rows > 14 ? (size.rows - 12) / 2 : 1;
+    const int bar_width = content_width < 50 ? content_width : 50;
 
-    std::cout << "\n\n";
-    std::cout << "                         " << word << "\n\n";
-    std::cout << "  State: " << state_label(state.state)
-              << "    WPM: " << state.wpm
-              << "    Token: " << shown_index << "/" << state.token_count
-              << "    Remaining: " << remaining_seconds << "s\n\n";
-    std::cout << "  Space play/pause   h rewind   l forward   j/k WPM   r restart   q quit\n";
+    std::cout << repeat('\n', top_padding);
+    print_centered("Kode Dot RSVP Reader", size.columns);
+    std::cout << '\n';
+    print_centered(word, size.columns);
+    std::cout << '\n';
+    print_centered(progress_bar(state.token_index, state.token_count, bar_width), size.columns);
+    std::cout << '\n';
+
+    const std::string status =
+        std::string("State: ") + state_label(state.state) +
+        "    WPM: " + std::to_string(state.wpm) +
+        "    Token: " + std::to_string(shown_index) + "/" +
+        std::to_string(state.token_count) +
+        "    Remaining: " + std::to_string(remaining_seconds) + "s";
+    print_centered(status, size.columns);
+    std::cout << '\n';
+    print_centered("Space play/pause   h/l back/forward   j/k WPM   r restart   q quit",
+                   size.columns);
     std::cout.flush();
 }
 
@@ -239,15 +345,16 @@ int main() {
     const auto playback_settings =
         stored_settings ? to_playback_settings(*stored_settings) : PlaybackSettings{};
     const auto tokens = tokenize(kSampleText);
+    auto frames = make_display_frames(tokens);
 
     DisplayAdapter adapter(
-        tokens, playback_settings,
+        frames, playback_settings,
         [](const DisplayState& state) { render(state); });
 
     const auto stored_bookmark = load_bookmark(dir / "bookmark.state");
     if (stored_bookmark && stored_bookmark->doc_id == kDocId &&
         stored_bookmark->content_hash == source_hash) {
-        adapter.seek(stored_bookmark->token_index, monotonic_ms());
+        adapter.seek(bookmark_frame_index(*stored_bookmark, frames), monotonic_ms());
     }
     adapter.emit_current();
 

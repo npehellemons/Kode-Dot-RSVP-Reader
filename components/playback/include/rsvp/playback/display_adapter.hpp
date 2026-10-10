@@ -14,6 +14,9 @@ public:
     DisplayAdapter(std::vector<rsvp::text::Token> tokens,
                    PlaybackSettings settings,
                    Callback callback);
+    DisplayAdapter(std::vector<rsvp::text::DisplayFrame> frames,
+                   PlaybackSettings settings,
+                   Callback callback);
 
     const DisplayState& snapshot() const;
     const PlaybackSettings& settings() const;

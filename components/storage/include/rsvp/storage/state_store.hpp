@@ -37,6 +37,9 @@ struct BookmarkV1 {
     std::uint64_t content_hash = 0;
     std::size_t source_byte_offset = 0;
     std::size_t token_index = 0;
+    std::size_t frame_index = 0;
+    std::size_t source_token_index = 0;
+    std::size_t chunk_index = 0;
     std::uint64_t updated_at = 0;
 };
 

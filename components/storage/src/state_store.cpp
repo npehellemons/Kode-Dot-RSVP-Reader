@@ -242,6 +242,9 @@ std::string serialize_bookmark(const BookmarkV1& bookmark) {
            << "content_hash=" << to_hex(bookmark.content_hash) << '\n'
            << "source_byte_offset=" << bookmark.source_byte_offset << '\n'
            << "token_index=" << bookmark.token_index << '\n'
+           << "frame_index=" << bookmark.frame_index << '\n'
+           << "source_token_index=" << bookmark.source_token_index << '\n'
+           << "chunk_index=" << bookmark.chunk_index << '\n'
            << "updated_at=" << bookmark.updated_at << '\n';
     return stream.str();
 }
@@ -257,6 +260,9 @@ std::optional<BookmarkV1> parse_bookmark(std::string_view serialized) {
     const auto hash_value = get_value(values, "content_hash");
     const auto offset_value = get_value(values, "source_byte_offset");
     const auto token_value = get_value(values, "token_index");
+    const auto frame_value = get_value(values, "frame_index");
+    const auto source_token_value = get_value(values, "source_token_index");
+    const auto chunk_value = get_value(values, "chunk_index");
     const auto updated_value = get_value(values, "updated_at");
 
     const auto schema = schema_value ? parse_decimal<int>(*schema_value) : std::nullopt;
@@ -265,11 +271,19 @@ std::optional<BookmarkV1> parse_bookmark(std::string_view serialized) {
                                      : std::nullopt;
     const auto token = token_value ? parse_decimal<std::size_t>(*token_value)
                                    : std::nullopt;
+    const auto frame = frame_value ? parse_decimal<std::size_t>(*frame_value)
+                                   : token;
+    const auto source_token =
+        source_token_value ? parse_decimal<std::size_t>(*source_token_value)
+                           : token;
+    const auto chunk = chunk_value ? parse_decimal<std::size_t>(*chunk_value)
+                                   : std::optional<std::size_t>{0};
     const auto updated = updated_value ? parse_decimal<std::uint64_t>(*updated_value)
                                        : std::nullopt;
 
     if (!schema || *schema != BookmarkV1::kSchemaVersion || !doc_id ||
-        doc_id->empty() || !hash || !offset || !token || !updated) {
+        doc_id->empty() || !hash || !offset || !token || !frame ||
+        !source_token || !chunk || !updated) {
         return std::nullopt;
     }
 
@@ -278,6 +292,9 @@ std::optional<BookmarkV1> parse_bookmark(std::string_view serialized) {
     bookmark.content_hash = *hash;
     bookmark.source_byte_offset = *offset;
     bookmark.token_index = *token;
+    bookmark.frame_index = *frame;
+    bookmark.source_token_index = *source_token;
+    bookmark.chunk_index = *chunk;
     bookmark.updated_at = *updated;
     return bookmark;
 }

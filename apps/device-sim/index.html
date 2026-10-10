@@ -125,6 +125,7 @@
       min-width: 0;
       padding: 0 26px;
       position: relative;
+      overflow: hidden;
     }
 
     .reader-area::before,
@@ -150,17 +151,27 @@
 
     .word {
       align-self: end;
-      justify-self: center;
+      justify-self: start;
+      position: relative;
+      left: 50%;
       max-width: 100%;
       color: var(--text);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 50px;
+      font-size: var(--word-size, 50px);
       line-height: 1;
       font-weight: 400;
       letter-spacing: 0;
       white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      overflow: visible;
+      transform: translateX(0);
+    }
+
+    .reader-area.needs-chunking .word {
+      color: var(--amber);
+    }
+
+    .reader-area.center-fallback .word {
+      color: var(--text);
     }
 
     .word .orp {
@@ -202,6 +213,12 @@
 
     .reader-footer .right-stat {
       justify-self: end;
+    }
+
+    .reader-footer .fit-stat {
+      grid-column: 1 / -1;
+      color: var(--amber);
+      justify-self: center;
     }
 
     .front-controls {
@@ -561,6 +578,7 @@
               <span id="position">1/44</span>
               <span id="wpm" class="center-stat">250 WPM</span>
               <span id="remaining" class="right-stat">0:14</span>
+              <span id="fit-status" class="fit-stat" aria-live="polite"></span>
             </div>
           </div>
         </div>
@@ -617,6 +635,7 @@
         <li><code>Space</code><span>Primary button toggles play and pause.</span></li>
         <li><code>← / →</code><span>D-pad left and right step one token backward or forward.</span></li>
         <li><code>↑ / ↓</code><span>D-pad up and down adjust WPM in 25 WPM increments.</span></li>
+        <li><code>L</code><span>Toggle a long-word sample for fit and split fallback testing.</span></li>
         <li><code>R</code><span>Secondary button restarts the bundled sample.</span></li>
       </ul>
 
@@ -625,6 +644,7 @@
         <button type="button" data-action="restart">Restart</button>
         <button type="button" data-action="slower">Slower</button>
         <button type="button" data-action="faster">Faster</button>
+        <button type="button" data-action="longSample">Long-word sample</button>
       </div>
 
       <p class="note">Body dimensions use the provided 73 × 43 × 15 mm reference. This simulator intentionally shows only the front face. Button and bezel placements are production-style approximations until measured from a physical device.</p>
@@ -632,8 +652,12 @@
   </main>
 
   <script>
-    const sampleText = "Welcome to the Kode Dot RSVP Reader. This simulator keeps the actual screen resolution visible while we refine layout, controls, pacing, and saved reading state before using real device APIs.";
-    const tokens = sampleText.trim().split(/\s+/);
+    const samples = {
+      normal: "Welcome to the Kode Dot RSVP Reader. This simulator keeps the actual screen resolution visible while we refine layout, controls, pacing, and saved reading state before using real device APIs.",
+      longWords: "Fit comfortable counterrevolutionaries incomprehensibilities pneumonoultramicroscopicsilicovolcanoconiosis antidisestablishmentarianism supercalifragilisticexpialidocious end."
+    };
+    let currentSample = "normal";
+    let tokens = samples[currentSample].trim().split(/\s+/);
     const state = {
       index: 0,
       wpm: 250,
@@ -642,11 +666,15 @@
     };
 
     const word = document.getElementById("word");
+    const readerArea = document.querySelector(".reader-area");
     const wpm = document.getElementById("wpm");
     const position = document.getElementById("position");
     const progressFill = document.getElementById("progress-fill");
     const progress = document.querySelector(".progress");
     const remaining = document.getElementById("remaining");
+    const fitStatus = document.getElementById("fit-status");
+    const baseWordSize = 50;
+    const minWordSize = 28;
 
     function durationMs() {
       const current = tokens[state.index] || "";
@@ -658,14 +686,9 @@
 
     function render() {
       const current = tokens[state.index] || "";
-      const pivot = Math.min(Math.max(Math.floor((current.length - 1) * 0.35), 0), Math.max(current.length - 1, 0));
-      word.innerHTML = "";
-      for (let i = 0; i < current.length; i += 1) {
-        const span = document.createElement("span");
-        span.textContent = current[i];
-        if (i === pivot) span.className = "orp";
-        word.appendChild(span);
-      }
+      readerArea.classList.remove("needs-chunking", "center-fallback");
+      fitStatus.textContent = "";
+      renderWord(current, orpIndex(current.length));
       wpm.textContent = `${state.wpm} WPM`;
       position.textContent = `${Math.min(state.index + 1, tokens.length)}/${tokens.length}`;
       const pct = tokens.length <= 1 ? 100 : Math.round((state.index / (tokens.length - 1)) * 100);
@@ -675,6 +698,80 @@
       const remainingTokens = Math.max(0, tokens.length - state.index - 1);
       const remainingSeconds = Math.ceil((remainingTokens * (60000 / state.wpm)) / 1000);
       remaining.textContent = `0:${String(remainingSeconds).padStart(2, "0")}`;
+      fitWordToScreen(current);
+    }
+
+    function orpIndex(length) {
+      if (length <= 1) return 0;
+      if (length <= 5) return 1;
+      if (length <= 9) return 2;
+      if (length <= 13) return 3;
+      return 4;
+    }
+
+    function centeredIndex(length) {
+      return Math.max(0, Math.floor((length - 1) / 2));
+    }
+
+    function renderWord(current, pivot) {
+      word.innerHTML = "";
+      word.style.setProperty("--word-size", `${baseWordSize}px`);
+      word.style.transform = "translateX(0)";
+      for (let i = 0; i < current.length; i += 1) {
+        const span = document.createElement("span");
+        span.textContent = current[i];
+        if (i === pivot) span.className = "orp";
+        word.appendChild(span);
+      }
+    }
+
+    function alignOrpToFixation() {
+      const orp = word.querySelector(".orp");
+      if (!orp) return;
+      const wordRect = word.getBoundingClientRect();
+      const orpRect = orp.getBoundingClientRect();
+      const orpCenter = orpRect.left + orpRect.width / 2;
+      const wordLeft = wordRect.left;
+      word.style.transform = `translateX(${wordLeft - orpCenter}px)`;
+    }
+
+    function fitsReaderArea() {
+      const wordRect = word.getBoundingClientRect();
+      const areaRect = readerArea.getBoundingClientRect();
+      return wordRect.left >= areaRect.left + 4 && wordRect.right <= areaRect.right - 4;
+    }
+
+    function centerWord() {
+      word.style.transform = "translateX(-50%)";
+    }
+
+    function fitWordToScreen(current) {
+      for (let size = baseWordSize; size >= minWordSize; size -= 2) {
+        word.style.setProperty("--word-size", `${size}px`);
+        word.style.transform = "translateX(0)";
+        alignOrpToFixation();
+        if (fitsReaderArea()) {
+          return;
+        }
+      }
+
+      renderWord(current, centeredIndex(current.length));
+      readerArea.classList.add("center-fallback");
+      fitStatus.textContent = "centered";
+      for (let size = baseWordSize; size >= minWordSize; size -= 2) {
+        word.style.setProperty("--word-size", `${size}px`);
+        centerWord();
+        if (fitsReaderArea()) {
+          return;
+        }
+      }
+
+      word.style.setProperty("--word-size", `${minWordSize}px`);
+      centerWord();
+      if (!fitsReaderArea()) {
+        readerArea.classList.add("needs-chunking");
+        fitStatus.textContent = "split needed";
+      }
     }
 
     function stopTimer() {
@@ -724,6 +821,11 @@
       } else if (action === "restart") {
         state.index = 0;
         state.playing = false;
+      } else if (action === "longSample") {
+        currentSample = currentSample === "normal" ? "longWords" : "normal";
+        tokens = samples[currentSample].trim().split(/\s+/);
+        state.index = 0;
+        state.playing = false;
       }
       render();
       scheduleNext();
@@ -742,6 +844,8 @@
         ArrowRight: "forward",
         ArrowUp: "faster",
         ArrowDown: "slower",
+        l: "longSample",
+        L: "longSample",
         r: "restart",
         R: "restart"
       };

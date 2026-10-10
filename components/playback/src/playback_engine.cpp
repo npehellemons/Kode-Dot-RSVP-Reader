@@ -21,11 +21,17 @@ std::uint64_t saturating_add(std::uint64_t lhs, std::uint64_t rhs) {
 
 PlaybackEngine::PlaybackEngine(std::vector<rsvp::text::Token> tokens,
                                PlaybackSettings settings)
-    : tokens_(std::move(tokens)), settings_(settings) {
+    : PlaybackEngine(rsvp::text::make_display_frames(tokens), settings) {}
+
+PlaybackEngine::PlaybackEngine(std::vector<rsvp::text::DisplayFrame> frames,
+                               PlaybackSettings settings)
+    : frames_(std::move(frames)), settings_(settings) {
     set_wpm(settings_.wpm);
     snapshot_.state = PlaybackState::idle;
     snapshot_.token_index = 0;
-    snapshot_.token_count = tokens_.size();
+    snapshot_.token_count = frames_.size();
+    snapshot_.frame_index = 0;
+    snapshot_.frame_count = frames_.size();
     snapshot_.wpm = settings_.wpm;
     update_visible_token();
     update_remaining();
@@ -40,11 +46,12 @@ const PlaybackSettings& PlaybackEngine::settings() const {
 }
 
 void PlaybackEngine::start(std::uint64_t monotonic_ms) {
-    if (tokens_.empty()) {
+    if (frames_.empty()) {
         finish();
         return;
     }
-    snapshot_.token_index = std::min(snapshot_.token_index, tokens_.size() - 1);
+    snapshot_.token_index = std::min(snapshot_.token_index, frames_.size() - 1);
+    snapshot_.frame_index = snapshot_.token_index;
     snapshot_.state = PlaybackState::playing;
     update_visible_token();
     update_remaining();
@@ -59,7 +66,7 @@ void PlaybackEngine::pause() {
 }
 
 void PlaybackEngine::resume(std::uint64_t monotonic_ms) {
-    if (tokens_.empty()) {
+    if (frames_.empty()) {
         finish();
         return;
     }
@@ -73,7 +80,8 @@ void PlaybackEngine::resume(std::uint64_t monotonic_ms) {
 
 void PlaybackEngine::restart(std::uint64_t monotonic_ms) {
     snapshot_.token_index = 0;
-    if (tokens_.empty()) {
+    snapshot_.frame_index = 0;
+    if (frames_.empty()) {
         finish();
         return;
     }
@@ -83,14 +91,16 @@ void PlaybackEngine::restart(std::uint64_t monotonic_ms) {
     schedule_next_from(monotonic_ms);
 }
 
-void PlaybackEngine::seek(std::size_t token_index, std::uint64_t monotonic_ms) {
-    if (tokens_.empty()) {
+void PlaybackEngine::seek(std::size_t frame_index, std::uint64_t monotonic_ms) {
+    if (frames_.empty()) {
         snapshot_.token_index = 0;
+        snapshot_.frame_index = 0;
         finish();
         return;
     }
 
-    snapshot_.token_index = std::min(token_index, tokens_.size() - 1);
+    snapshot_.token_index = std::min(frame_index, frames_.size() - 1);
+    snapshot_.frame_index = snapshot_.token_index;
     if (snapshot_.state == PlaybackState::finished) {
         snapshot_.state = PlaybackState::paused;
     }
@@ -102,7 +112,7 @@ void PlaybackEngine::seek(std::size_t token_index, std::uint64_t monotonic_ms) {
 }
 
 void PlaybackEngine::rewind_one(std::uint64_t monotonic_ms) {
-    if (tokens_.empty()) {
+    if (frames_.empty()) {
         return;
     }
     const auto target = snapshot_.token_index == 0 ? 0 : snapshot_.token_index - 1;
@@ -110,11 +120,12 @@ void PlaybackEngine::rewind_one(std::uint64_t monotonic_ms) {
 }
 
 void PlaybackEngine::advance_one(std::uint64_t monotonic_ms) {
-    if (tokens_.empty()) {
+    if (frames_.empty()) {
         return;
     }
-    if (snapshot_.token_index + 1 >= tokens_.size()) {
-        snapshot_.token_index = tokens_.size() - 1;
+    if (snapshot_.token_index + 1 >= frames_.size()) {
+        snapshot_.token_index = frames_.size() - 1;
+        snapshot_.frame_index = snapshot_.token_index;
         finish();
         return;
     }
@@ -136,27 +147,28 @@ void PlaybackEngine::set_punctuation_pause_mode(PunctuationPauseMode mode) {
 }
 
 bool PlaybackEngine::tick(std::uint64_t monotonic_ms) {
-    if (snapshot_.state != PlaybackState::playing || tokens_.empty()) {
+    if (snapshot_.state != PlaybackState::playing || frames_.empty()) {
         return false;
     }
     if (monotonic_ms < next_due_ms_) {
         return false;
     }
 
-    if (snapshot_.token_index + 1 >= tokens_.size()) {
+    if (snapshot_.token_index + 1 >= frames_.size()) {
         finish();
         return true;
     }
 
     ++snapshot_.token_index;
+    snapshot_.frame_index = snapshot_.token_index;
     update_visible_token();
     update_remaining();
     schedule_next_from(monotonic_ms);
     return true;
 }
 
-std::uint64_t PlaybackEngine::duration_for_index(std::size_t token_index) const {
-    if (tokens_.empty() || token_index >= tokens_.size()) {
+std::uint64_t PlaybackEngine::duration_for_index(std::size_t frame_index) const {
+    if (frames_.empty() || frame_index >= frames_.size()) {
         return base_duration_ms();
     }
 
@@ -165,7 +177,7 @@ std::uint64_t PlaybackEngine::duration_for_index(std::size_t token_index) const 
         return base;
     }
 
-    const auto flags = tokens_[token_index].punctuation_flags;
+    const auto flags = frames_[frame_index].punctuation_flags;
     if (rsvp::text::has_flag(flags, rsvp::text::PunctuationFlags::sentence_end)) {
         return base * 2;
     }
@@ -183,21 +195,33 @@ std::uint64_t PlaybackEngine::base_duration_ms() const {
 }
 
 void PlaybackEngine::update_visible_token() {
-    if (tokens_.empty()) {
+    if (frames_.empty()) {
         snapshot_.visible_token.reset();
+        snapshot_.visible_frame.reset();
         return;
     }
-    snapshot_.visible_token = tokens_[snapshot_.token_index];
+    const auto& frame = frames_[snapshot_.token_index];
+    snapshot_.visible_frame = frame;
+    snapshot_.source_token_index = frame.source_token_index;
+    snapshot_.chunk_index = frame.chunk_index;
+    snapshot_.chunk_count = frame.chunk_count;
+
+    rsvp::text::Token token;
+    token.text_utf8 = frame.text_utf8;
+    token.source_byte_start = frame.source_byte_start;
+    token.source_byte_length = frame.source_byte_length;
+    token.punctuation_flags = frame.punctuation_flags;
+    snapshot_.visible_token = token;
 }
 
 void PlaybackEngine::update_remaining() {
-    if (tokens_.empty() || snapshot_.token_index >= tokens_.size()) {
+    if (frames_.empty() || snapshot_.token_index >= frames_.size()) {
         snapshot_.estimated_remaining_ms = 0;
         return;
     }
 
     std::uint64_t total = 0;
-    for (std::size_t i = snapshot_.token_index; i < tokens_.size(); ++i) {
+    for (std::size_t i = snapshot_.token_index; i < frames_.size(); ++i) {
         total = saturating_add(total, duration_for_index(i));
     }
     snapshot_.estimated_remaining_ms = total;
