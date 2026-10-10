@@ -43,8 +43,10 @@ using rsvp::storage::serialize_bookmark;
 using rsvp::storage::serialize_settings;
 using rsvp::storage::to_hex;
 using rsvp::text::DisplayFrameOptions;
+using rsvp::text::Chapter;
 using rsvp::text::PunctuationFlags;
 using rsvp::text::centered_index_for_codepoints;
+using rsvp::text::make_chapters_from_markdown_headings;
 using rsvp::text::make_display_frames;
 using rsvp::text::orp_index_for_codepoints;
 using rsvp::text::has_flag;
@@ -288,6 +290,27 @@ void test_display_frames_preserve_utf8_boundaries() {
     require(frames[1].source_byte_length == 3, "utf8 final chunk source length");
 }
 
+void test_chapters_from_markdown_headings() {
+    const std::string source = "# One\nAlpha beta.\n# Two\nGamma delta.";
+    const auto frames = make_display_frames(tokenize(source));
+    const auto chapters = make_chapters_from_markdown_headings(source, frames);
+
+    require(chapters.size() == 2, "markdown chapter count");
+    require(chapters[0].title == "One", "first markdown chapter title");
+    require(chapters[1].title == "Two", "second markdown chapter title");
+    require(chapters[0].first_frame_index == 0, "first chapter starts at first frame");
+    require(chapters[0].frame_count > 0, "first chapter has frames");
+    require(chapters[1].first_frame_index > chapters[0].first_frame_index,
+            "second chapter starts after first");
+    require(chapters[1].frame_count > 0, "second chapter has frames");
+
+    const auto fallback = make_chapters_from_markdown_headings(
+        "No heading here.", make_display_frames(tokenize("No heading here.")),
+        "Fallback");
+    require(fallback.size() == 1, "fallback chapter count");
+    require(fallback[0].title == "Fallback", "fallback chapter title");
+}
+
 void test_playback_advances_by_display_frame() {
     DisplayFrameOptions options;
     options.max_codepoints_per_frame = 8;
@@ -332,6 +355,49 @@ void test_playback_advances_by_display_frame() {
     engine.rewind_one(400);
     require(engine.snapshot().frame_index == 2, "rewind returns to final chunk");
     require(engine.snapshot().chunk_index == 2, "rewind chunk index");
+}
+
+void test_playback_exposes_chapter_progress_and_remaining_time() {
+    const auto frames = make_display_frames(tokenize("one two. three four."));
+    std::vector<Chapter> chapters;
+    Chapter first;
+    first.title = "First";
+    first.source_byte_start = 0;
+    first.source_byte_length = 8;
+    first.first_frame_index = 0;
+    first.frame_count = 2;
+    chapters.push_back(first);
+
+    Chapter second;
+    second.title = "Second";
+    second.source_byte_start = 9;
+    second.source_byte_length = 11;
+    second.first_frame_index = 2;
+    second.frame_count = 2;
+    chapters.push_back(second);
+
+    PlaybackEngine engine(frames, chapters, PlaybackSettings{.wpm = 300});
+    require(engine.snapshot().chapter_count == 2, "playback chapter count");
+    require(engine.snapshot().chapter_index == 0, "initial chapter index");
+    require(engine.snapshot().chapter_title == "First", "initial chapter title");
+    require(engine.snapshot().chapter_frame_index == 0,
+            "initial chapter frame index");
+    require(engine.snapshot().chapter_frame_count == 2,
+            "initial chapter frame count");
+    require(engine.snapshot().estimated_chapter_remaining_ms == 600,
+            "initial chapter remaining includes sentence pause");
+    require(engine.snapshot().estimated_remaining_ms == 1200,
+            "initial document remaining includes both chapters");
+
+    engine.seek(2, 0);
+    require(engine.snapshot().chapter_index == 1, "seek reaches second chapter");
+    require(engine.snapshot().chapter_title == "Second", "second chapter title");
+    require(engine.snapshot().chapter_frame_index == 0,
+            "second chapter local frame index");
+    require(engine.snapshot().estimated_chapter_remaining_ms == 600,
+            "second chapter remaining");
+    require(engine.snapshot().estimated_remaining_ms == 600,
+            "document remaining from second chapter");
 }
 
 void test_playback_word_navigation_pauses_and_skips_chunks() {
@@ -595,7 +661,9 @@ int main() {
     test_display_frames_without_chunking();
     test_display_frames_chunk_long_tokens();
     test_display_frames_preserve_utf8_boundaries();
+    test_chapters_from_markdown_headings();
     test_playback_advances_by_display_frame();
+    test_playback_exposes_chapter_progress_and_remaining_time();
     test_playback_word_navigation_pauses_and_skips_chunks();
     test_playback_sentence_rewind_pauses_and_repeats();
     test_settings_serialization_and_atomic_load();

@@ -591,7 +591,7 @@
               <div class="progress" role="progressbar" aria-label="Reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <span id="progress-fill"></span>
               </div>
-              <span id="position">1/44</span>
+              <span id="position">1/30</span>
               <span id="wpm" class="center-stat">250 WPM</span>
               <span id="remaining" class="right-stat">0:14</span>
               <span id="fit-status" class="fit-stat" aria-live="polite"></span>
@@ -707,13 +707,16 @@
     const baseWordSize = 50;
     const minWordSize = 28;
 
-    function durationMs() {
-      const current = frameData.frames[state.index];
+    function durationForFrame(current) {
       const base = Math.ceil(60000 / state.wpm);
       if (!current) return base;
       if (current.punctuation_flags.includes("sentence_end")) return base * 2;
       if (current.punctuation_flags.includes("comma")) return Math.ceil(base * 1.5);
       return base;
+    }
+
+    function durationMs() {
+      return durationForFrame(frameData.frames[state.index]);
     }
 
     function render() {
@@ -728,14 +731,18 @@
           ? `${current.chunk_index + 1}/${current.chunk_count}`
           : "centered";
       }
-      wpm.textContent = `${state.wpm} WPM`;
-      position.textContent = `${Math.min(state.index + 1, frameData.frames.length)}/${frameData.frames.length}`;
-      const pct = frameData.frames.length <= 1 ? 100 : Math.round((state.index / (frameData.frames.length - 1)) * 100);
+      const chapter = currentChapter();
+      const chapterFrameIndex = Math.max(0, state.index - chapter.first_frame_index);
+      const chapterFrameCount = Math.max(1, chapter.frame_count);
+      position.textContent = `${Math.min(chapterFrameIndex + 1, chapterFrameCount)}/${chapterFrameCount}`;
+      const pct = chapterFrameCount <= 1
+        ? 100
+        : Math.round((chapterFrameIndex / (chapterFrameCount - 1)) * 100);
       progressFill.style.width = `${pct}%`;
       progress.setAttribute("aria-valuenow", String(pct));
       document.querySelector('[data-action="toggle"].round-button').textContent = state.playing ? "Ⅱ" : "▶";
-      const remainingFrames = Math.max(0, frameData.frames.length - state.index - 1);
-      const remainingSeconds = Math.ceil((remainingFrames * (60000 / state.wpm)) / 1000);
+      wpm.textContent = `${state.wpm} WPM`;
+      const remainingSeconds = Math.ceil(chapterRemainingMs(chapter) / 1000);
       remaining.textContent = `0:${String(remainingSeconds).padStart(2, "0")}`;
       fitWordToScreen(current);
       screen.classList.toggle("is-sleeping", state.sleeping);
@@ -828,6 +835,18 @@
       return {
         schema: options.schema,
         max_codepoints_per_frame: options.max_codepoints_per_frame,
+        chapters: [{
+          index: 0,
+          title: "Document",
+          source_byte_start: frames[0] ? frames[0].source_byte_start : 0,
+          source_byte_length: frames.length
+            ? frames[frames.length - 1].source_byte_start +
+              frames[frames.length - 1].source_byte_length -
+              frames[0].source_byte_start
+            : 0,
+          first_frame_index: 0,
+          frame_count: frames.length
+        }],
         frames
       };
     }
@@ -835,6 +854,18 @@
     function isValidFrameData(candidate) {
       return candidate &&
         candidate.schema === frameOptions.schema &&
+        (!candidate.chapters || (
+          Array.isArray(candidate.chapters) &&
+          candidate.chapters.every((chapter, index) =>
+            chapter &&
+            chapter.index === index &&
+            typeof chapter.title === "string" &&
+            Number.isInteger(chapter.source_byte_start) &&
+            Number.isInteger(chapter.source_byte_length) &&
+            Number.isInteger(chapter.first_frame_index) &&
+            Number.isInteger(chapter.frame_count)
+          )
+        )) &&
         Array.isArray(candidate.frames) &&
         candidate.frames.every((frame, index) =>
           frame &&
@@ -868,6 +899,42 @@
       } catch {
         return false;
       }
+    }
+
+    function chapters() {
+      if (Array.isArray(frameData.chapters) && frameData.chapters.length > 0) {
+        return frameData.chapters;
+      }
+      return [{
+        index: 0,
+        title: "Document",
+        source_byte_start: 0,
+        source_byte_length: 0,
+        first_frame_index: 0,
+        frame_count: frameData.frames.length
+      }];
+    }
+
+    function currentChapter() {
+      const allChapters = chapters();
+      for (const chapter of allChapters) {
+        const first = chapter.first_frame_index;
+        const past = first + chapter.frame_count;
+        if (state.index >= first && state.index < past) {
+          return chapter;
+        }
+      }
+      return allChapters[allChapters.length - 1];
+    }
+
+    function chapterRemainingMs(chapter) {
+      const past = Math.min(chapter.first_frame_index + chapter.frame_count,
+        frameData.frames.length);
+      let total = 0;
+      for (let index = state.index; index < past; index += 1) {
+        total += durationForFrame(frameData.frames[index]);
+      }
+      return total;
     }
 
     function firstFrameForSourceToken(sourceTokenIndex) {

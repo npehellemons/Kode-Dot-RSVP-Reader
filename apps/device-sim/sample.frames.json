@@ -1,6 +1,16 @@
 {
   "schema": "rsvp-display-frames-v1",
   "max_codepoints_per_frame": 16,
+  "chapters": [
+    {
+      "index": 0,
+      "title": "Document",
+      "source_byte_start": 0,
+      "source_byte_length": 191,
+      "first_frame_index": 0,
+      "frame_count": 30
+    }
+  ],
   "frames": [
     {
       "index": 0,

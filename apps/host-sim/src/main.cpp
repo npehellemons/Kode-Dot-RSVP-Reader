@@ -1,6 +1,7 @@
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/storage/state_store.hpp"
+#include "rsvp/text/chapter.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
@@ -37,6 +38,7 @@ using rsvp::lifecycle::to_playback_settings;
 using rsvp::storage::content_hash;
 using rsvp::storage::load_bookmark;
 using rsvp::storage::load_settings;
+using rsvp::text::make_chapters_from_markdown_headings;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
 
@@ -214,6 +216,10 @@ void render(const DisplayState& state) {
     const auto word = state.visible_token ? state.visible_token->text_utf8 : std::string{};
     const auto shown_index = state.token_count == 0 ? 0 : state.token_index + 1;
     const auto remaining_seconds = (state.estimated_remaining_ms + 999) / 1000;
+    const auto chapter_remaining_seconds =
+        (state.estimated_chapter_remaining_ms + 999) / 1000;
+    const auto chapter_shown =
+        state.chapter_frame_count == 0 ? 0 : state.chapter_frame_index + 1;
     const int content_width = size.columns > 10 ? size.columns - 4 : size.columns;
     const int top_padding = size.rows > 14 ? (size.rows - 12) / 2 : 1;
     const int bar_width = content_width < 50 ? content_width : 50;
@@ -233,6 +239,13 @@ void render(const DisplayState& state) {
         std::to_string(state.token_count) +
         "    Remaining: " + std::to_string(remaining_seconds) + "s";
     print_centered(status, size.columns);
+    std::cout << '\n';
+    const std::string chapter =
+        "Chapter: " + state.chapter_title + "    " +
+        std::to_string(chapter_shown) + "/" +
+        std::to_string(state.chapter_frame_count) +
+        "    Remaining: " + std::to_string(chapter_remaining_seconds) + "s";
+    print_centered(chapter, size.columns);
     std::cout << '\n';
     print_centered("Space red play/pause   h/l word step   j/k WPM   r sentence   s sleep   q quit",
                    size.columns);
@@ -274,9 +287,11 @@ int main() {
         stored_settings ? to_playback_settings(*stored_settings) : PlaybackSettings{};
     const auto tokens = tokenize(kSampleText);
     auto frames = make_display_frames(tokens);
+    auto chapters = make_chapters_from_markdown_headings(kSampleText, frames,
+                                                         "Preview");
 
     DisplayAdapter adapter(
-        frames, playback_settings,
+        frames, chapters, playback_settings,
         [](const DisplayState& state) { render(state); });
 
     const auto stored_bookmark = load_bookmark(dir / "bookmark.state");

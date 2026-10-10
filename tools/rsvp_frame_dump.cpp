@@ -1,3 +1,4 @@
+#include "rsvp/text/chapter.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
@@ -12,6 +13,7 @@ namespace {
 using rsvp::text::DisplayFrameOptions;
 using rsvp::text::PunctuationFlags;
 using rsvp::text::has_flag;
+using rsvp::text::make_chapters_from_markdown_headings;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
 
@@ -124,10 +126,26 @@ int main(int argc, char* argv[]) {
     }
 
     const auto frames = make_display_frames(tokenize(source), options);
+    const auto chapters = make_chapters_from_markdown_headings(source, frames);
 
     std::cout << "{\n  \"schema\": \"rsvp-display-frames-v1\",\n";
     std::cout << "  \"max_codepoints_per_frame\": " << options.max_codepoints_per_frame
               << ",\n";
+    std::cout << "  \"chapters\": [\n";
+    for (std::size_t index = 0; index < chapters.size(); ++index) {
+        const auto& chapter = chapters[index];
+        std::cout << "    {\n";
+        std::cout << "      \"index\": " << index << ",\n";
+        std::cout << "      \"title\": ";
+        write_json_string(std::cout, chapter.title);
+        std::cout << ",\n";
+        std::cout << "      \"source_byte_start\": " << chapter.source_byte_start << ",\n";
+        std::cout << "      \"source_byte_length\": " << chapter.source_byte_length << ",\n";
+        std::cout << "      \"first_frame_index\": " << chapter.first_frame_index << ",\n";
+        std::cout << "      \"frame_count\": " << chapter.frame_count << '\n';
+        std::cout << "    }" << (index + 1 == chapters.size() ? "" : ",") << '\n';
+    }
+    std::cout << "  ],\n";
     std::cout << "  \"frames\": [\n";
     for (std::size_t index = 0; index < frames.size(); ++index) {
         const auto& frame = frames[index];

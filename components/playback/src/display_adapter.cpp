@@ -12,6 +12,13 @@ DisplayAdapter::DisplayAdapter(std::vector<rsvp::text::DisplayFrame> frames,
                                Callback callback)
     : engine_(std::move(frames), settings), callback_(std::move(callback)) {}
 
+DisplayAdapter::DisplayAdapter(std::vector<rsvp::text::DisplayFrame> frames,
+                               std::vector<rsvp::text::Chapter> chapters,
+                               PlaybackSettings settings,
+                               Callback callback)
+    : engine_(std::move(frames), std::move(chapters), settings),
+      callback_(std::move(callback)) {}
+
 const DisplayState& DisplayAdapter::snapshot() const {
     return engine_.snapshot();
 }
@@ -109,8 +116,14 @@ bool DisplayAdapter::differs_from_last_emit(const DisplayState& state) const {
         state.source_token_index != last_emitted_.source_token_index ||
         state.chunk_index != last_emitted_.chunk_index ||
         state.chunk_count != last_emitted_.chunk_count ||
+        state.chapter_index != last_emitted_.chapter_index ||
+        state.chapter_count != last_emitted_.chapter_count ||
+        state.chapter_frame_index != last_emitted_.chapter_frame_index ||
+        state.chapter_frame_count != last_emitted_.chapter_frame_count ||
+        state.chapter_title != last_emitted_.chapter_title ||
         state.wpm != last_emitted_.wpm ||
         state.estimated_remaining_ms != last_emitted_.estimated_remaining_ms ||
+        state.estimated_chapter_remaining_ms != last_emitted_.estimated_chapter_remaining_ms ||
         state.visible_token.has_value() != last_emitted_.visible_token.has_value() ||
         state.visible_frame.has_value() != last_emitted_.visible_frame.has_value()) {
         return true;

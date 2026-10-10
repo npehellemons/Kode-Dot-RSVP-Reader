@@ -1,11 +1,13 @@
 #pragma once
 
+#include "rsvp/text/chapter.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace rsvp::playback {
@@ -36,10 +38,16 @@ struct DisplayState {
     std::size_t source_token_index = 0;
     std::size_t chunk_index = 0;
     std::size_t chunk_count = 1;
+    std::size_t chapter_index = 0;
+    std::size_t chapter_count = 0;
+    std::size_t chapter_frame_index = 0;
+    std::size_t chapter_frame_count = 0;
+    std::string chapter_title;
     int wpm = 250;
     std::optional<rsvp::text::Token> visible_token;
     std::optional<rsvp::text::DisplayFrame> visible_frame;
     std::uint64_t estimated_remaining_ms = 0;
+    std::uint64_t estimated_chapter_remaining_ms = 0;
 };
 
 class PlaybackEngine {
@@ -48,6 +56,9 @@ public:
                             PlaybackSettings settings = {});
     explicit PlaybackEngine(std::vector<rsvp::text::DisplayFrame> frames,
                             PlaybackSettings settings = {});
+    PlaybackEngine(std::vector<rsvp::text::DisplayFrame> frames,
+                   std::vector<rsvp::text::Chapter> chapters,
+                   PlaybackSettings settings = {});
 
     const DisplayState& snapshot() const;
     const PlaybackSettings& settings() const;
@@ -79,12 +90,14 @@ private:
     std::size_t next_word_frame() const;
     std::size_t sentence_start_for_frame(std::size_t frame_index) const;
     std::size_t previous_sentence_start_before(std::size_t frame_index) const;
+    std::size_t chapter_index_for_frame(std::size_t frame_index) const;
     void update_visible_token();
     void update_remaining();
     void schedule_next_from(std::uint64_t monotonic_ms);
     void finish();
 
     std::vector<rsvp::text::DisplayFrame> frames_;
+    std::vector<rsvp::text::Chapter> chapters_;
     PlaybackSettings settings_;
     DisplayState snapshot_;
     std::uint64_t next_due_ms_ = 0;

@@ -25,13 +25,21 @@ PlaybackEngine::PlaybackEngine(std::vector<rsvp::text::Token> tokens,
 
 PlaybackEngine::PlaybackEngine(std::vector<rsvp::text::DisplayFrame> frames,
                                PlaybackSettings settings)
-    : frames_(std::move(frames)), settings_(settings) {
+    : PlaybackEngine(std::move(frames), {}, settings) {}
+
+PlaybackEngine::PlaybackEngine(std::vector<rsvp::text::DisplayFrame> frames,
+                               std::vector<rsvp::text::Chapter> chapters,
+                               PlaybackSettings settings)
+    : frames_(std::move(frames)),
+      chapters_(chapters.empty() ? rsvp::text::make_single_chapter(frames_) : std::move(chapters)),
+      settings_(settings) {
     set_wpm(settings_.wpm);
     snapshot_.state = PlaybackState::idle;
     snapshot_.token_index = 0;
     snapshot_.token_count = frames_.size();
     snapshot_.frame_index = 0;
     snapshot_.frame_count = frames_.size();
+    snapshot_.chapter_count = chapters_.size();
     snapshot_.wpm = settings_.wpm;
     update_visible_token();
     update_remaining();
@@ -296,10 +304,33 @@ std::size_t PlaybackEngine::previous_sentence_start_before(std::size_t frame_ind
     return sentence_start_for_frame(previous_sentence_end);
 }
 
+std::size_t PlaybackEngine::chapter_index_for_frame(std::size_t frame_index) const {
+    if (chapters_.empty()) {
+        return 0;
+    }
+
+    const auto clamped = frames_.empty() ? std::size_t{0}
+                                         : std::min(frame_index, frames_.size() - 1);
+    for (std::size_t index = 0; index < chapters_.size(); ++index) {
+        const auto& chapter = chapters_[index];
+        const auto begin = chapter.first_frame_index;
+        const auto end = begin + chapter.frame_count;
+        if (clamped >= begin && clamped < end) {
+            return index;
+        }
+    }
+    return chapters_.size() - 1;
+}
+
 void PlaybackEngine::update_visible_token() {
     if (frames_.empty()) {
         snapshot_.visible_token.reset();
         snapshot_.visible_frame.reset();
+        snapshot_.chapter_index = 0;
+        snapshot_.chapter_count = chapters_.size();
+        snapshot_.chapter_frame_index = 0;
+        snapshot_.chapter_frame_count = 0;
+        snapshot_.chapter_title.clear();
         return;
     }
     const auto& frame = frames_[snapshot_.token_index];
@@ -314,11 +345,24 @@ void PlaybackEngine::update_visible_token() {
     token.source_byte_length = frame.source_byte_length;
     token.punctuation_flags = frame.punctuation_flags;
     snapshot_.visible_token = token;
+
+    snapshot_.chapter_count = chapters_.size();
+    snapshot_.chapter_index = chapter_index_for_frame(snapshot_.frame_index);
+    if (!chapters_.empty()) {
+        const auto& chapter = chapters_[snapshot_.chapter_index];
+        snapshot_.chapter_title = chapter.title;
+        snapshot_.chapter_frame_count = chapter.frame_count;
+        snapshot_.chapter_frame_index =
+            snapshot_.frame_index >= chapter.first_frame_index
+                ? snapshot_.frame_index - chapter.first_frame_index
+                : std::size_t{0};
+    }
 }
 
 void PlaybackEngine::update_remaining() {
     if (frames_.empty() || snapshot_.token_index >= frames_.size()) {
         snapshot_.estimated_remaining_ms = 0;
+        snapshot_.estimated_chapter_remaining_ms = 0;
         return;
     }
 
@@ -327,6 +371,17 @@ void PlaybackEngine::update_remaining() {
         total = saturating_add(total, duration_for_index(i));
     }
     snapshot_.estimated_remaining_ms = total;
+
+    std::uint64_t chapter_total = 0;
+    if (!chapters_.empty()) {
+        const auto& chapter = chapters_[chapter_index_for_frame(snapshot_.frame_index)];
+        const auto chapter_end =
+            std::min(chapter.first_frame_index + chapter.frame_count, frames_.size());
+        for (std::size_t i = snapshot_.token_index; i < chapter_end; ++i) {
+            chapter_total = saturating_add(chapter_total, duration_for_index(i));
+        }
+    }
+    snapshot_.estimated_chapter_remaining_ms = chapter_total;
 }
 
 void PlaybackEngine::schedule_next_from(std::uint64_t monotonic_ms) {
@@ -337,6 +392,7 @@ void PlaybackEngine::finish() {
     snapshot_.state = PlaybackState::finished;
     update_visible_token();
     snapshot_.estimated_remaining_ms = 0;
+    snapshot_.estimated_chapter_remaining_ms = 0;
 }
 
 } // namespace rsvp::playback
