@@ -1,6 +1,7 @@
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
 #include "rsvp/storage/state_store.hpp"
+#include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
 
 #include <cstdlib>
@@ -33,9 +34,14 @@ using rsvp::storage::save_settings_atomic;
 using rsvp::storage::serialize_bookmark;
 using rsvp::storage::serialize_settings;
 using rsvp::storage::to_hex;
+using rsvp::text::DisplayFrameOptions;
 using rsvp::text::PunctuationFlags;
+using rsvp::text::centered_index_for_codepoints;
+using rsvp::text::make_display_frames;
+using rsvp::text::orp_index_for_codepoints;
 using rsvp::text::has_flag;
 using rsvp::text::tokenize;
+using rsvp::text::utf8_codepoint_count;
 
 int failures = 0;
 
@@ -199,6 +205,81 @@ void test_wpm_bounds_and_punctuation_durations() {
     require(engine.duration_for_index(0) == 100, "punctuation off uses base duration");
 }
 
+void test_display_frame_orp_indexes() {
+    require(orp_index_for_codepoints(0) == 0, "empty ORP index");
+    require(orp_index_for_codepoints(1) == 0, "one-letter ORP index");
+    require(orp_index_for_codepoints(2) == 1, "two-letter ORP index");
+    require(orp_index_for_codepoints(5) == 1, "five-letter ORP index");
+    require(orp_index_for_codepoints(6) == 2, "six-letter ORP index");
+    require(orp_index_for_codepoints(9) == 2, "nine-letter ORP index");
+    require(orp_index_for_codepoints(10) == 3, "ten-letter ORP index");
+    require(orp_index_for_codepoints(13) == 3, "thirteen-letter ORP index");
+    require(orp_index_for_codepoints(14) == 4, "fourteen-letter ORP index");
+    require(centered_index_for_codepoints(10) == 4, "centered fallback even length");
+    require(centered_index_for_codepoints(11) == 5, "centered fallback odd length");
+}
+
+void test_display_frames_without_chunking() {
+    const auto frames = make_display_frames(tokenize("a rapid testing"));
+    require(frames.size() == 3, "display frame count without chunking");
+    require(frames[0].text_utf8 == "a", "single-letter frame text");
+    require(frames[0].orp_codepoint_index == 0, "single-letter frame ORP");
+    require(frames[1].text_utf8 == "rapid", "rapid frame text");
+    require(frames[1].orp_codepoint_index == 1, "rapid frame ORP");
+    require(!frames[1].centered_fallback, "normal frame not centered fallback");
+    require(frames[2].text_utf8 == "testing", "testing frame text");
+    require(frames[2].orp_codepoint_index == 2, "testing frame ORP");
+}
+
+void test_display_frames_chunk_long_tokens() {
+    DisplayFrameOptions options;
+    options.max_codepoints_per_frame = 8;
+
+    const auto frames = make_display_frames(tokenize("supercalifragilistic!"), options);
+    require(frames.size() == 3, "long token chunk count");
+    require(frames[0].text_utf8 == "supercal-", "first chunk has continuation marker");
+    require(frames[0].source_byte_start == 0, "first chunk source byte start");
+    require(frames[0].source_byte_length == 8, "first chunk source byte length");
+    require(frames[0].chunk_index == 0, "first chunk index");
+    require(frames[0].chunk_count == 3, "first chunk count");
+    require(frames[0].continuation_after, "first chunk continues after");
+    require(!frames[0].continuation_before, "first chunk no continuation before");
+    require(frames[0].centered_fallback, "first chunk uses centered fallback");
+    require(frames[0].orp_codepoint_index == 4, "first chunk centered ORP index");
+    require(!has_flag(frames[0].punctuation_flags, PunctuationFlags::sentence_end),
+            "first chunk does not carry sentence punctuation");
+
+    require(frames[1].text_utf8 == "ifragili-", "second chunk text");
+    require(frames[1].source_byte_start == 8, "second chunk source byte start");
+    require(frames[1].source_byte_length == 8, "second chunk source byte length");
+    require(frames[1].continuation_before, "second chunk continuation before");
+    require(frames[1].continuation_after, "second chunk continuation after");
+
+    require(frames[2].text_utf8 == "stic!", "final chunk text");
+    require(frames[2].source_byte_start == 16, "final chunk source byte start");
+    require(frames[2].source_byte_length == 5, "final chunk source byte length");
+    require(frames[2].continuation_before, "final chunk continuation before");
+    require(!frames[2].continuation_after, "final chunk does not continue after");
+    require(has_flag(frames[2].punctuation_flags, PunctuationFlags::sentence_end),
+            "final chunk carries sentence punctuation");
+}
+
+void test_display_frames_preserve_utf8_boundaries() {
+    DisplayFrameOptions options;
+    options.max_codepoints_per_frame = 3;
+    const auto frames = make_display_frames(tokenize("éclair"), options);
+
+    require(frames.size() == 2, "utf8 chunk count");
+    require(frames[0].text_utf8 == "\xC3\xA9" "cl-", "utf8 first chunk text");
+    require(frames[0].source_byte_start == 0, "utf8 first chunk source start");
+    require(frames[0].source_byte_length == 4, "utf8 first chunk source length");
+    require(utf8_codepoint_count(frames[0].text_utf8) == 4,
+            "utf8 first chunk display codepoint count includes marker");
+    require(frames[1].text_utf8 == "air", "utf8 final chunk text");
+    require(frames[1].source_byte_start == 4, "utf8 final chunk source start");
+    require(frames[1].source_byte_length == 3, "utf8 final chunk source length");
+}
+
 std::filesystem::path temp_test_dir(const char* name) {
     const auto dir = std::filesystem::temp_directory_path() /
                      (std::string("kode-rsvp-") + name);
@@ -294,6 +375,10 @@ int main() {
     test_playback_overslept_tick_only_advances_once();
     test_seek_rewind_advance_and_finish();
     test_wpm_bounds_and_punctuation_durations();
+    test_display_frame_orp_indexes();
+    test_display_frames_without_chunking();
+    test_display_frames_chunk_long_tokens();
+    test_display_frames_preserve_utf8_boundaries();
     test_settings_serialization_and_atomic_load();
     test_bookmark_serialization_hash_and_atomic_load();
 

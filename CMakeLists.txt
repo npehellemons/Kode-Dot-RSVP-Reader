@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(rsvp_text
+    components/text/src/display_frame.cpp
     components/text/src/tokenizer.cpp
 )
 target_include_directories(rsvp_text PUBLIC
