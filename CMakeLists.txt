@@ -30,10 +30,18 @@ target_include_directories(rsvp_storage PUBLIC
     components/storage/include
 )
 
+add_library(rsvp_lifecycle
+    components/lifecycle/src/reader_lifecycle.cpp
+)
+target_include_directories(rsvp_lifecycle PUBLIC
+    components/lifecycle/include
+)
+target_link_libraries(rsvp_lifecycle PUBLIC rsvp_playback rsvp_storage)
+
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
-target_link_libraries(rsvp_host_preview PRIVATE rsvp_playback rsvp_storage)
+target_link_libraries(rsvp_host_preview PRIVATE rsvp_lifecycle)
 
 add_executable(rsvp_frame_dump
     tools/rsvp_frame_dump.cpp
@@ -45,6 +53,6 @@ if(BUILD_TESTING)
     add_executable(rsvp_core_tests
         tests/core_tests.cpp
     )
-    target_link_libraries(rsvp_core_tests PRIVATE rsvp_playback rsvp_storage)
+    target_link_libraries(rsvp_core_tests PRIVATE rsvp_lifecycle)
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
 endif()

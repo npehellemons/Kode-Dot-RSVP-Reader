@@ -1,3 +1,4 @@
+#include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
@@ -25,16 +26,17 @@ using rsvp::playback::DisplayAdapter;
 using rsvp::playback::DisplayState;
 using rsvp::playback::PlaybackSettings;
 using rsvp::playback::PlaybackState;
-using rsvp::playback::PunctuationPauseMode;
-using rsvp::storage::BookmarkV1;
-using rsvp::storage::PunctuationMode;
-using rsvp::storage::SettingsV1;
+using rsvp::lifecycle::DocumentIdentity;
+using rsvp::lifecycle::ReaderStatePaths;
+using rsvp::lifecycle::bookmark_matches_document;
+using rsvp::lifecycle::capture_reader_state;
+using rsvp::lifecycle::pause_and_persist_for_sleep;
+using rsvp::lifecycle::persist_reader_state;
+using rsvp::lifecycle::resolve_bookmark_frame;
+using rsvp::lifecycle::to_playback_settings;
 using rsvp::storage::content_hash;
 using rsvp::storage::load_bookmark;
 using rsvp::storage::load_settings;
-using rsvp::storage::save_bookmark_atomic;
-using rsvp::storage::save_settings_atomic;
-using rsvp::text::DisplayFrame;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
 
@@ -126,89 +128,13 @@ std::uint64_t wall_time_seconds() {
         std::chrono::duration_cast<std::chrono::seconds>(now).count());
 }
 
-PunctuationPauseMode to_playback_punctuation(PunctuationMode mode) {
-    switch (mode) {
-    case PunctuationMode::off:
-        return PunctuationPauseMode::off;
-    case PunctuationMode::gentle:
-        return PunctuationPauseMode::gentle;
-    }
-    return PunctuationPauseMode::gentle;
-}
-
-PunctuationMode to_storage_punctuation(PunctuationPauseMode mode) {
-    switch (mode) {
-    case PunctuationPauseMode::off:
-        return PunctuationMode::off;
-    case PunctuationPauseMode::gentle:
-        return PunctuationMode::gentle;
-    }
-    return PunctuationMode::gentle;
-}
-
-PlaybackSettings to_playback_settings(const SettingsV1& settings) {
-    PlaybackSettings playback;
-    playback.wpm = settings.wpm;
-    playback.punctuation_pause_mode = to_playback_punctuation(settings.punctuation_mode);
-    return playback;
-}
-
-SettingsV1 settings_from_playback(const PlaybackSettings& playback_settings) {
-    SettingsV1 settings;
-    settings.wpm = playback_settings.wpm;
-    settings.punctuation_mode =
-        to_storage_punctuation(playback_settings.punctuation_pause_mode);
-    return settings;
-}
-
-BookmarkV1 bookmark_from_display(const DisplayState& state,
-                                 std::uint64_t source_hash) {
-    BookmarkV1 bookmark;
-    bookmark.doc_id = kDocId;
-    bookmark.content_hash = source_hash;
-    bookmark.token_index = state.frame_index;
-    bookmark.frame_index = state.frame_index;
-    bookmark.source_token_index = state.source_token_index;
-    bookmark.chunk_index = state.chunk_index;
-    bookmark.source_byte_offset =
-        state.visible_frame ? state.visible_frame->source_byte_start : 0;
-    bookmark.updated_at = wall_time_seconds();
-    return bookmark;
-}
-
-std::size_t bookmark_frame_index(const BookmarkV1& bookmark,
-                                 const std::vector<DisplayFrame>& frames) {
-    if (bookmark.frame_index < frames.size()) {
-        const auto& frame = frames[bookmark.frame_index];
-        if (frame.source_token_index == bookmark.source_token_index &&
-            frame.chunk_index == bookmark.chunk_index) {
-            return bookmark.frame_index;
-        }
-    }
-
-    for (std::size_t index = 0; index < frames.size(); ++index) {
-        const auto& frame = frames[index];
-        if (frame.source_token_index == bookmark.source_token_index &&
-            frame.chunk_index == bookmark.chunk_index) {
-            return index;
-        }
-    }
-
-    for (std::size_t index = 0; index < frames.size(); ++index) {
-        if (frames[index].source_byte_start >= bookmark.source_byte_offset) {
-            return index;
-        }
-    }
-
-    return frames.empty() ? std::size_t{0} : frames.size() - 1;
-}
-
 void save_preview_state(const std::filesystem::path& dir,
-                        const DisplayState& state,
-                        const PlaybackSettings& playback_settings,
-                        std::uint64_t source_hash) {
-    save_settings_atomic(dir / "settings.state", settings_from_playback(playback_settings));
-    save_bookmark_atomic(dir / "bookmark.state", bookmark_from_display(state, source_hash));
+                        const DisplayAdapter& adapter,
+                        const DocumentIdentity& document) {
+    persist_reader_state(
+        {dir / "settings.state", dir / "bookmark.state"},
+        capture_reader_state(document, adapter.snapshot(), adapter.settings(),
+                             wall_time_seconds()));
 }
 
 TerminalSize terminal_size() {
@@ -308,7 +234,7 @@ void render(const DisplayState& state) {
         "    Remaining: " + std::to_string(remaining_seconds) + "s";
     print_centered(status, size.columns);
     std::cout << '\n';
-    print_centered("Space red play/pause   h/l word step   j/k WPM   r hold red sentence   q quit",
+    print_centered("Space red play/pause   h/l word step   j/k WPM   r sentence   s sleep   q quit",
                    size.columns);
     std::cout.flush();
 }
@@ -341,6 +267,8 @@ int main() {
 
     const auto dir = state_dir();
     const auto source_hash = content_hash(kSampleText);
+    const DocumentIdentity document{kDocId, source_hash};
+    const ReaderStatePaths state_paths{dir / "settings.state", dir / "bookmark.state"};
     const auto stored_settings = load_settings(dir / "settings.state");
     const auto playback_settings =
         stored_settings ? to_playback_settings(*stored_settings) : PlaybackSettings{};
@@ -352,9 +280,8 @@ int main() {
         [](const DisplayState& state) { render(state); });
 
     const auto stored_bookmark = load_bookmark(dir / "bookmark.state");
-    if (stored_bookmark && stored_bookmark->doc_id == kDocId &&
-        stored_bookmark->content_hash == source_hash) {
-        adapter.seek(bookmark_frame_index(*stored_bookmark, frames), monotonic_ms());
+    if (stored_bookmark && bookmark_matches_document(*stored_bookmark, document)) {
+        adapter.seek(resolve_bookmark_frame(*stored_bookmark, frames), monotonic_ms());
     }
     adapter.emit_current();
 
@@ -366,33 +293,37 @@ int main() {
                 toggle_playback(adapter);
                 if (adapter.snapshot().state == PlaybackState::paused ||
                     adapter.snapshot().state == PlaybackState::finished) {
-                    save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+                    save_preview_state(dir, adapter, document);
                 }
                 break;
             case 'h':
             case 'H':
                 adapter.rewind_word(monotonic_ms());
-                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+                save_preview_state(dir, adapter, document);
                 break;
             case 'l':
             case 'L':
                 adapter.advance_word(monotonic_ms());
-                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+                save_preview_state(dir, adapter, document);
                 break;
             case 'j':
             case 'J':
                 adapter.set_wpm(adapter.snapshot().wpm - 25);
-                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+                save_preview_state(dir, adapter, document);
                 break;
             case 'k':
             case 'K':
                 adapter.set_wpm(adapter.snapshot().wpm + 25);
-                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+                save_preview_state(dir, adapter, document);
                 break;
             case 'r':
             case 'R':
                 adapter.rewind_sentence(monotonic_ms());
-                save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+                save_preview_state(dir, adapter, document);
+                break;
+            case 's':
+            case 'S':
+                pause_and_persist_for_sleep(adapter, state_paths, document, wall_time_seconds());
                 break;
             case 'q':
             case 'Q':
@@ -407,7 +338,7 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
-    save_preview_state(dir, adapter.snapshot(), adapter.settings(), source_hash);
+    save_preview_state(dir, adapter, document);
     clear_screen();
     std::cout << "RSVP preview closed.\n";
     return 0;

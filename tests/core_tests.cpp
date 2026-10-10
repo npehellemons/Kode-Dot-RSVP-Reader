@@ -1,3 +1,4 @@
+#include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
 #include "rsvp/storage/state_store.hpp"
@@ -19,6 +20,13 @@ using rsvp::playback::PlaybackState;
 using rsvp::playback::PunctuationPauseMode;
 using rsvp::playback::DisplayAdapter;
 using rsvp::playback::DisplayState;
+using rsvp::lifecycle::DocumentIdentity;
+using rsvp::lifecycle::ReaderStatePaths;
+using rsvp::lifecycle::bookmark_matches_document;
+using rsvp::lifecycle::capture_reader_state;
+using rsvp::lifecycle::pause_and_persist_for_sleep;
+using rsvp::lifecycle::resolve_bookmark_frame;
+using rsvp::lifecycle::to_playback_settings;
 using rsvp::storage::BookmarkV1;
 using rsvp::storage::FixationMode;
 using rsvp::storage::PunctuationMode;
@@ -495,6 +503,82 @@ void test_bookmark_serialization_hash_and_atomic_load() {
     std::filesystem::remove_all(dir, error);
 }
 
+void test_lifecycle_sleep_pauses_persists_and_does_not_advance() {
+    const std::string source = "one two three";
+    const auto frames = make_display_frames(tokenize(source));
+    const DocumentIdentity document{"sleep-fixture", content_hash(source)};
+    const auto dir = temp_test_dir("lifecycle-sleep");
+    const ReaderStatePaths paths{dir / "settings.state", dir / "bookmark.state"};
+
+    DisplayAdapter adapter(
+        frames, PlaybackSettings{.wpm = 300},
+        [](const DisplayState&) {});
+    adapter.start(0);
+    adapter.tick(200);
+    require(adapter.snapshot().frame_index == 1, "sleep fixture advances to second frame");
+    require(adapter.snapshot().state == PlaybackState::playing,
+            "sleep fixture is playing before sleep");
+
+    require(pause_and_persist_for_sleep(adapter, paths, document, 1234),
+            "sleep lifecycle persists state");
+    require(adapter.snapshot().state == PlaybackState::paused,
+            "sleep lifecycle pauses playback");
+    require(adapter.snapshot().frame_index == 1,
+            "sleep lifecycle keeps current frame");
+    require(!adapter.tick(100000),
+            "sleep lifecycle prevents monotonic catch-up advancement");
+    require(adapter.snapshot().frame_index == 1,
+            "sleep lifecycle remains on same frame after later tick");
+
+    const auto loaded_settings = load_settings(paths.settings_path);
+    const auto loaded_bookmark = load_bookmark(paths.bookmark_path);
+    require(loaded_settings.has_value(), "sleep lifecycle saved settings");
+    require(loaded_settings->wpm == 300, "sleep lifecycle saved wpm");
+    require(loaded_bookmark.has_value(), "sleep lifecycle saved bookmark");
+    require(bookmark_matches_document(*loaded_bookmark, document),
+            "sleep lifecycle bookmark matches document");
+    require(loaded_bookmark->frame_index == 1, "sleep lifecycle saved frame index");
+    require(loaded_bookmark->updated_at == 1234, "sleep lifecycle saved timestamp");
+
+    DisplayAdapter restored(
+        frames, to_playback_settings(*loaded_settings),
+        [](const DisplayState&) {});
+    restored.seek(resolve_bookmark_frame(*loaded_bookmark, frames), 5000);
+    require(restored.snapshot().frame_index == 1, "sleep lifecycle restore frame");
+    require(restored.snapshot().visible_frame->text_utf8 == "two",
+            "sleep lifecycle restore visible frame");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
+void test_lifecycle_bookmark_resolution_falls_back_to_source_identity() {
+    DisplayFrameOptions options;
+    options.max_codepoints_per_frame = 8;
+    const auto frames = make_display_frames(tokenize("one supercalifragilistic! three"),
+                                            options);
+    const DocumentIdentity document{"doc", 42};
+
+    DisplayAdapter adapter(
+        frames, PlaybackSettings{},
+        [](const DisplayState&) {});
+    adapter.seek(1, 0);
+    const auto captured = capture_reader_state(document, adapter.snapshot(),
+                                               adapter.settings(), 99);
+
+    auto moved = captured.bookmark;
+    moved.frame_index = 99;
+    require(resolve_bookmark_frame(moved, frames) == 1,
+            "bookmark resolves by source token and chunk when frame changed");
+
+    auto offset_only = captured.bookmark;
+    offset_only.frame_index = 99;
+    offset_only.source_token_index = 99;
+    offset_only.chunk_index = 99;
+    require(resolve_bookmark_frame(offset_only, frames) == 1,
+            "bookmark resolves by source byte offset as final fallback");
+}
+
 } // namespace
 
 int main() {
@@ -516,6 +600,8 @@ int main() {
     test_playback_sentence_rewind_pauses_and_repeats();
     test_settings_serialization_and_atomic_load();
     test_bookmark_serialization_hash_and_atomic_load();
+    test_lifecycle_sleep_pauses_persists_and_does_not_advance();
+    test_lifecycle_bookmark_resolution_falls_back_to_source_identity();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
