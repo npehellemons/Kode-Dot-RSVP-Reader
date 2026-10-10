@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kode Dot RSVP Device Simulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #181c1f;
+      --panel-2: #20262a;
+      --case: #e8e5dc;
+      --case-edge: #b9b5aa;
+      --screen: #050606;
+      --screen-soft: #020303;
+      --text: #f2f4f1;
+      --muted: #9ca7a2;
+      --line: #30383d;
+      --green: #62d290;
+      --blue: #77a8ff;
+      --amber: #d6b35c;
+      --rsvp-red: #f25b5b;
+      --danger: #ff7b7b;
+      --shadow: rgba(0, 0, 0, 0.38);
+      --screen-w: 410;
+      --screen-h: 502;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(119, 168, 255, 0.11), transparent 32rem),
+        linear-gradient(135deg, #0d0f11 0%, #171b1e 52%, #0f1113 100%);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(360px, 0.96fr) minmax(320px, 0.7fr);
+      gap: 28px;
+      align-items: center;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .device-stage {
+      display: grid;
+      place-items: center;
+      min-width: 0;
+    }
+
+    .device {
+      width: min(100%, 440px);
+      aspect-ratio: 43 / 73;
+      background: var(--case);
+      border: 1px solid var(--case-edge);
+      border-radius: 36px;
+      box-shadow:
+        0 26px 60px var(--shadow),
+        inset 0 2px 0 rgba(255, 255, 255, 0.45);
+      padding: 34px 30px 26px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 16px;
+      position: relative;
+    }
+
+    .device::before {
+      content: "";
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      width: 42px;
+      height: 50px;
+      background: linear-gradient(145deg, #fff8bb, #f0df72);
+      clip-path: polygon(100% 0, 32% 0, 100% 68%);
+      border-top-right-radius: 18px;
+      opacity: 0.92;
+      filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.4));
+    }
+
+    .screen-shell {
+      background: #080909;
+      border: 1px solid rgba(0, 0, 0, 0.72);
+      border-radius: 58px;
+      padding: 0;
+      box-shadow:
+        0 12px 22px rgba(0, 0, 0, 0.22),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+      overflow: hidden;
+    }
+
+    .screen {
+      aspect-ratio: 410 / 502;
+      background:
+        radial-gradient(circle at center, rgba(242, 91, 91, 0.08), transparent 24%),
+        linear-gradient(180deg, var(--screen-soft), var(--screen));
+      border-radius: 58px;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 1fr 70px;
+      outline: none;
+    }
+
+    .reader-footer {
+      color: var(--muted);
+      font-size: 13px;
+      min-width: 0;
+    }
+
+    .reader-area {
+      display: grid;
+      grid-template-rows: 1fr auto 1fr;
+      align-items: center;
+      min-width: 0;
+      padding: 0 26px;
+      position: relative;
+    }
+
+    .reader-area::before,
+    .reader-area::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      width: 2px;
+      height: 34px;
+      transform: translateX(-50%);
+      background: linear-gradient(180deg, transparent, var(--rsvp-red), transparent);
+      opacity: 0.82;
+      filter: drop-shadow(0 0 8px rgba(242, 91, 91, 0.45));
+    }
+
+    .reader-area::before {
+      top: 28px;
+    }
+
+    .reader-area::after {
+      bottom: 24px;
+    }
+
+    .word {
+      align-self: end;
+      justify-self: center;
+      max-width: 100%;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 50px;
+      line-height: 1;
+      font-weight: 400;
+      letter-spacing: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .word .orp {
+      color: var(--rsvp-red);
+      text-shadow: 0 0 22px rgba(242, 91, 91, 0.62);
+    }
+
+    .progress {
+      width: 100%;
+      height: 3px;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.11);
+      overflow: hidden;
+      grid-column: 1 / -1;
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      width: var(--progress, 0%);
+      background: var(--rsvp-red);
+      border-radius: inherit;
+    }
+
+    .reader-footer {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 9px 10px;
+      align-content: center;
+      padding: 0 20px 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .reader-footer .center-stat {
+      color: var(--rsvp-red);
+      justify-self: center;
+    }
+
+    .reader-footer .right-stat {
+      justify-self: end;
+    }
+
+    .front-controls {
+      height: 204px;
+      position: relative;
+      align-self: start;
+      margin-top: 4px;
+    }
+
+    button {
+      font: inherit;
+      color: inherit;
+      border: 0;
+    }
+
+    .round-button {
+      background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.24), transparent 28%),
+        linear-gradient(145deg, #22272a, #080a0b);
+      border: 1px solid rgba(0, 0, 0, 0.78);
+      box-shadow:
+        0 9px 16px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        inset 0 -6px 10px rgba(0, 0, 0, 0.42);
+      cursor: pointer;
+    }
+
+    .round-button:active,
+    .round-button.is-active {
+      transform: translateY(1px);
+      border-color: rgba(98, 210, 144, 0.8);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.38), inset 0 0 0 2px rgba(98, 210, 144, 0.18);
+    }
+
+    .round-button {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-size: 0;
+      color: transparent;
+      position: relative;
+    }
+
+    .round-button::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      display: block;
+      transform: translate(-50%, -50%);
+      box-shadow:
+        inset 0 2px 4px rgba(255, 255, 255, 0.48),
+        inset 0 -4px 8px rgba(0, 0, 0, 0.28);
+    }
+
+    .face-buttons {
+      position: absolute;
+      right: 30px;
+      top: 30px;
+      width: 120px;
+      height: 140px;
+    }
+
+    .face-buttons .primary {
+      position: absolute;
+      right: 0;
+      top: 0;
+    }
+
+    .face-buttons .secondary {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+    }
+
+    .face-buttons .secondary::before {
+      width: 34px;
+      height: 34px;
+    }
+
+    .face-buttons .primary::before {
+      background:
+        radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.55), transparent 30%),
+        linear-gradient(145deg, #69bdff, #1d75bd);
+    }
+
+    .face-buttons .secondary::before {
+      background:
+        radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.48), transparent 30%),
+        linear-gradient(145deg, #ff6557, #d92a25);
+    }
+
+    .dpad {
+      width: 174px;
+      height: 174px;
+      display: block;
+      position: relative;
+      left: 18px;
+      top: 18px;
+      filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.28));
+    }
+
+    .dpad::before,
+    .dpad::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      background:
+        radial-gradient(circle at 32% 18%, rgba(255, 255, 255, 0.22), transparent 24%),
+        linear-gradient(145deg, #22272a, #080a0b);
+      border: 1px solid rgba(0, 0, 0, 0.78);
+      box-shadow:
+        0 9px 16px rgba(0, 0, 0, 0.42),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        inset 0 -6px 10px rgba(0, 0, 0, 0.42);
+      transform: translate(-50%, -50%);
+    }
+
+    .dpad::before {
+      width: 58px;
+      height: 174px;
+      border-radius: 31px;
+    }
+
+    .dpad::after {
+      width: 174px;
+      height: 58px;
+      border-radius: 31px;
+    }
+
+    .dpad button {
+      position: absolute;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+      color: transparent;
+      cursor: pointer;
+      font-size: 0;
+      z-index: 3;
+    }
+
+    .dpad button:active,
+    .dpad button.is-active {
+      transform: none;
+    }
+
+    .dpad .up {
+      width: 58px;
+      height: 72px;
+      left: 58px;
+      top: 0;
+    }
+
+    .dpad .left {
+      width: 72px;
+      height: 58px;
+      left: 0;
+      top: 58px;
+    }
+
+    .dpad .center {
+      position: absolute;
+      display: none;
+    }
+
+    .dpad .right {
+      width: 72px;
+      height: 58px;
+      right: 0;
+      top: 58px;
+    }
+
+    .dpad .down {
+      width: 58px;
+      height: 72px;
+      left: 58px;
+      bottom: 0;
+    }
+
+    .side-panel {
+      align-self: center;
+      background: rgba(24, 28, 31, 0.86);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.24);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      line-height: 1.2;
+      font-weight: 500;
+    }
+
+    .lede {
+      margin: 0 0 20px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .metric {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .metric strong {
+      font-size: 18px;
+      font-weight: 500;
+    }
+
+    .control-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .control-list li {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+
+    .control-list code {
+      color: var(--text);
+      background: #101416;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 4px 7px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    .sim-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .sim-actions button {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 12px;
+      cursor: pointer;
+    }
+
+    .sim-actions button:active {
+      transform: translateY(1px);
+    }
+
+    .note {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        grid-template-columns: 1fr;
+        padding: 18px;
+      }
+
+      .device {
+        max-width: 430px;
+      }
+
+      .word {
+        font-size: 42px;
+      }
+
+      .dpad {
+        width: 148px;
+        height: 148px;
+      }
+
+      .round-button {
+        width: 54px;
+        height: 54px;
+      }
+
+      .round-button::before {
+        width: 34px;
+        height: 34px;
+      }
+    }
+
+    @media (max-width: 430px) {
+      .device {
+        border-radius: 30px;
+        padding: 18px 14px 20px;
+      }
+
+      .front-controls {
+        gap: 10px;
+        padding-inline: 10px;
+      }
+
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .control-list li {
+        grid-template-columns: 72px 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="device-stage" aria-label="Kode Dot simulator">
+      <div class="device">
+        <div class="screen-shell">
+          <div class="screen" id="screen">
+            <div class="reader-area">
+              <div></div>
+              <div>
+                <div class="word" id="word">Welcome</div>
+              </div>
+              <div></div>
+            </div>
+            <div class="reader-footer">
+              <div class="progress" role="progressbar" aria-label="Reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="progress-fill"></span>
+              </div>
+              <span id="position">1/44</span>
+              <span id="wpm" class="center-stat">250 WPM</span>
+              <span id="remaining" class="right-stat">0:14</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="front-controls" aria-label="Physical controls">
+          <div class="dpad">
+            <button class="up" type="button" data-action="faster" aria-label="D-pad up faster">▲</button>
+            <button class="left" type="button" data-action="back" aria-label="D-pad left rewind">◀</button>
+            <div class="center" aria-hidden="true"></div>
+            <button class="right" type="button" data-action="forward" aria-label="D-pad right forward">▶</button>
+            <button class="down" type="button" data-action="slower" aria-label="D-pad down slower">▼</button>
+          </div>
+
+          <div class="face-buttons">
+            <button class="round-button primary" type="button" data-action="toggle" aria-label="Primary button play pause">▶</button>
+            <button class="round-button secondary" type="button" data-action="restart" aria-label="Secondary button restart">↻</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side-panel">
+      <h1>Kode Dot Simulator</h1>
+      <p class="lede">A local front-view virtual device for RSVP layout and control iteration, using the portrait-mounted screen and the production-style control layout.</p>
+
+      <div class="metrics" aria-label="Simulator facts">
+        <div class="metric">
+          <span>Body</span>
+          <strong>73 × 43 × 15 mm</strong>
+        </div>
+        <div class="metric">
+          <span>Screen mount</span>
+          <strong>410 × 502</strong>
+        </div>
+        <div class="metric">
+          <span>Panel pixels</span>
+          <strong>502 × 410</strong>
+        </div>
+        <div class="metric">
+          <span>Aspect ratio</span>
+          <strong>1.224</strong>
+        </div>
+        <div class="metric">
+          <span>Input model</span>
+          <strong>D-pad + 2</strong>
+        </div>
+        <div class="metric">
+          <span>Mode</span>
+          <strong>Offline</strong>
+        </div>
+      </div>
+
+      <ul class="control-list">
+        <li><code>Space</code><span>Primary button toggles play and pause.</span></li>
+        <li><code>← / →</code><span>D-pad left and right step one token backward or forward.</span></li>
+        <li><code>↑ / ↓</code><span>D-pad up and down adjust WPM in 25 WPM increments.</span></li>
+        <li><code>R</code><span>Secondary button restarts the bundled sample.</span></li>
+      </ul>
+
+      <div class="sim-actions">
+        <button type="button" data-action="toggle">Play / Pause</button>
+        <button type="button" data-action="restart">Restart</button>
+        <button type="button" data-action="slower">Slower</button>
+        <button type="button" data-action="faster">Faster</button>
+      </div>
+
+      <p class="note">Body dimensions use the provided 73 × 43 × 15 mm reference. This simulator intentionally shows only the front face. Button and bezel placements are production-style approximations until measured from a physical device.</p>
+    </aside>
+  </main>
+
+  <script>
+    const sampleText = "Welcome to the Kode Dot RSVP Reader. This simulator keeps the actual screen resolution visible while we refine layout, controls, pacing, and saved reading state before using real device APIs.";
+    const tokens = sampleText.trim().split(/\s+/);
+    const state = {
+      index: 0,
+      wpm: 250,
+      playing: false,
+      timer: 0
+    };
+
+    const word = document.getElementById("word");
+    const wpm = document.getElementById("wpm");
+    const position = document.getElementById("position");
+    const progressFill = document.getElementById("progress-fill");
+    const progress = document.querySelector(".progress");
+    const remaining = document.getElementById("remaining");
+
+    function durationMs() {
+      const current = tokens[state.index] || "";
+      const base = Math.ceil(60000 / state.wpm);
+      if (/[.!?]$/.test(current)) return base * 2;
+      if (/[,;:]$/.test(current)) return Math.ceil(base * 1.5);
+      return base;
+    }
+
+    function render() {
+      const current = tokens[state.index] || "";
+      const pivot = Math.min(Math.max(Math.floor((current.length - 1) * 0.35), 0), Math.max(current.length - 1, 0));
+      word.innerHTML = "";
+      for (let i = 0; i < current.length; i += 1) {
+        const span = document.createElement("span");
+        span.textContent = current[i];
+        if (i === pivot) span.className = "orp";
+        word.appendChild(span);
+      }
+      wpm.textContent = `${state.wpm} WPM`;
+      position.textContent = `${Math.min(state.index + 1, tokens.length)}/${tokens.length}`;
+      const pct = tokens.length <= 1 ? 100 : Math.round((state.index / (tokens.length - 1)) * 100);
+      progressFill.style.width = `${pct}%`;
+      progress.setAttribute("aria-valuenow", String(pct));
+      document.querySelector('[data-action="toggle"].round-button').textContent = state.playing ? "Ⅱ" : "▶";
+      const remainingTokens = Math.max(0, tokens.length - state.index - 1);
+      const remainingSeconds = Math.ceil((remainingTokens * (60000 / state.wpm)) / 1000);
+      remaining.textContent = `0:${String(remainingSeconds).padStart(2, "0")}`;
+    }
+
+    function stopTimer() {
+      window.clearTimeout(state.timer);
+      state.timer = 0;
+    }
+
+    function scheduleNext() {
+      stopTimer();
+      if (!state.playing) return;
+      state.timer = window.setTimeout(() => {
+        if (state.index + 1 >= tokens.length) {
+          state.playing = false;
+          render();
+          return;
+        }
+        state.index += 1;
+        render();
+        scheduleNext();
+      }, durationMs());
+    }
+
+    function pulse(action) {
+      document.querySelectorAll(`[data-action="${action}"]`).forEach((button) => {
+        button.classList.add("is-active");
+        window.setTimeout(() => button.classList.remove("is-active"), 120);
+      });
+    }
+
+    function perform(action) {
+      pulse(action);
+      if (action === "toggle") {
+        if (state.index >= tokens.length - 1 && !state.playing) state.index = 0;
+        state.playing = !state.playing;
+        render();
+        scheduleNext();
+        return;
+      }
+      if (action === "back") {
+        state.index = Math.max(0, state.index - 1);
+      } else if (action === "forward") {
+        state.index = Math.min(tokens.length - 1, state.index + 1);
+      } else if (action === "faster") {
+        state.wpm = Math.min(600, state.wpm + 25);
+      } else if (action === "slower") {
+        state.wpm = Math.max(100, state.wpm - 25);
+      } else if (action === "restart") {
+        state.index = 0;
+        state.playing = false;
+      }
+      render();
+      scheduleNext();
+    }
+
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-action]");
+      if (!button) return;
+      perform(button.dataset.action);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      const map = {
+        " ": "toggle",
+        ArrowLeft: "back",
+        ArrowRight: "forward",
+        ArrowUp: "faster",
+        ArrowDown: "slower",
+        r: "restart",
+        R: "restart"
+      };
+      const action = map[event.key];
+      if (!action) return;
+      event.preventDefault();
+      perform(action);
+    });
+
+    render();
+  </script>
+</body>
+</html>
