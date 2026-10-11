@@ -1,8 +1,8 @@
 #pragma once
 
 #include "kode_dot/reader_app.hpp"
+#include "kode_dot/reader_screen.hpp"
 #include "rsvp/platform/input_contract.hpp"
-#include "rsvp/ui/reader_view_model.hpp"
 
 #include <cstdint>
 
@@ -18,7 +18,7 @@ public:
 class ReaderRenderer {
 public:
     virtual ~ReaderRenderer() = default;
-    virtual void render(const rsvp::ui::ReaderViewModel& model) = 0;
+    virtual void render(const ReaderScreenFrame& frame) = 0;
 };
 
 class ReaderHost {

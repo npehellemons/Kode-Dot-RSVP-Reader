@@ -1,6 +1,7 @@
 #include "rsvp/controller/reader_controller.hpp"
 #include "kode_dot/reader_app.hpp"
 #include "kode_dot/reader_host.hpp"
+#include "kode_dot/reader_screen.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
@@ -86,6 +87,10 @@ using kode_dot::ReaderAppBoot;
 using kode_dot::ReaderClock;
 using kode_dot::ReaderHost;
 using kode_dot::ReaderRenderer;
+using kode_dot::ReaderScreenFrame;
+using kode_dot::ReaderScreenMode;
+using kode_dot::format_screen_duration;
+using kode_dot::make_reader_screen_frame;
 
 int failures = 0;
 
@@ -1331,12 +1336,66 @@ public:
 
 class FakeReaderRenderer : public ReaderRenderer {
 public:
-    std::vector<rsvp::ui::ReaderViewModel> rendered;
+    std::vector<ReaderScreenFrame> rendered;
 
-    void render(const rsvp::ui::ReaderViewModel& model) override {
-        rendered.push_back(model);
+    void render(const ReaderScreenFrame& frame) override {
+        rendered.push_back(frame);
     }
 };
+
+void test_kode_dot_reader_screen_frame_contract() {
+    rsvp::ui::ReaderViewModel model;
+    model.mode = ReaderVisualMode::context;
+    model.primary_text = "Sentence context";
+    model.context_words = {{"one", false}, {"supercalifragilistic", true}};
+    model.chapter_index = 2;
+    model.chapter_count = 12;
+    model.chapter_position = 42;
+    model.chapter_total = 300;
+    model.progress_percent = 14;
+    model.orp_codepoint_index = 5;
+    model.font_scale_percent = 92;
+    model.wpm = 275;
+    model.chapter_remaining_seconds = 125;
+    model.playing = false;
+    model.paused = true;
+
+    const auto frame = make_reader_screen_frame(model);
+    require(frame.mode == ReaderScreenMode::context,
+            "screen frame context mode");
+    require(frame.primary_text == "Sentence context",
+            "screen frame primary text");
+    require(frame.chapter_label == "Ch 2/12",
+            "screen frame chapter label");
+    require(frame.position_label == "42/300",
+            "screen frame position label");
+    require(frame.wpm_label == "275 WPM",
+            "screen frame WPM label");
+    require(frame.remaining_label == "2:05",
+            "screen frame remaining label");
+    require(frame.progress_percent == 14,
+            "screen frame progress");
+    require(frame.orp_codepoint_index == 5,
+            "screen frame ORP index");
+    require(frame.font_scale_percent == 92,
+            "screen frame font scale");
+    require(frame.context_words.size() == 2,
+            "screen frame context word count");
+    require(frame.context_words[1].text == "supercalifragilistic",
+            "screen frame context long word");
+    require(frame.context_words[1].current,
+            "screen frame current context word");
+    require(!frame.sleeping,
+            "screen frame context not sleeping");
+
+    model.mode = ReaderVisualMode::sleep;
+    const auto sleep = make_reader_screen_frame(model);
+    require(sleep.mode == ReaderScreenMode::sleep,
+            "screen frame sleep mode");
+    require(sleep.sleeping, "screen frame sleeping flag");
+    require(format_screen_duration(3661) == "1:01:01",
+            "screen frame hour duration format");
+}
 
 void test_kode_dot_reader_host_routes_clock_and_renderer() {
     const auto dir = temp_test_dir("kode-dot-reader-host");
@@ -1357,7 +1416,7 @@ void test_kode_dot_reader_host_routes_clock_and_renderer() {
     host.render();
     require(renderer.rendered.size() == 1,
             "reader host initial render called");
-    require(renderer.rendered.back().mode == ReaderVisualMode::title,
+    require(renderer.rendered.back().mode == ReaderScreenMode::title,
             "reader host initial render title");
 
     clock.monotonic = 1;
@@ -1368,20 +1427,24 @@ void test_kode_dot_reader_host_routes_clock_and_renderer() {
             "reader host renders after handled control");
     require(renderer.rendered.back().playing,
             "reader host rendered playing model");
+    require(renderer.rendered.back().wpm_label == "300 WPM",
+            "reader host rendered screen WPM label");
 
     clock.monotonic = 300;
     require(host.tick(), "reader host routes playback tick");
     require(renderer.rendered.size() == 3,
             "reader host renders after handled tick");
-    require(renderer.rendered.back().frame_position == 2,
+    require(renderer.rendered.back().position_label == "2/3",
             "reader host tick advanced frame");
 
     clock.monotonic = 500;
     clock.state_timestamp = 20;
     require(host.dispatch_lifecycle(LifecycleSignal::sleep),
             "reader host routes lifecycle event");
-    require(renderer.rendered.back().mode == ReaderVisualMode::sleep,
+    require(renderer.rendered.back().mode == ReaderScreenMode::sleep,
             "reader host renders sleep model");
+    require(renderer.rendered.back().sleeping,
+            "reader host sleep screen flag");
 
     std::error_code error;
     std::filesystem::remove_all(dir, error);
@@ -1432,6 +1495,7 @@ int main() {
     test_reader_view_model_modes_and_progress();
     test_reader_view_model_context_rejoins_split_words();
     test_kode_dot_reader_app_scaffold_routes_runtime();
+    test_kode_dot_reader_screen_frame_contract();
     test_kode_dot_reader_host_routes_clock_and_renderer();
 
     if (failures != 0) {

@@ -10,7 +10,7 @@ ReaderHost::ReaderHost(ReaderApp app, ReaderClock& clock, ReaderRenderer& render
       renderer_(renderer) {}
 
 void ReaderHost::render() {
-    renderer_.render(app_.view_model());
+    renderer_.render(make_reader_screen_frame(app_.view_model()));
 }
 
 bool ReaderHost::tick() {
