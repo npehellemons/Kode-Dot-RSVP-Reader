@@ -192,6 +192,23 @@ int main(int argc, char* argv[]) {
     std::cout << "    \"chapter_source\": ";
     write_json_string(std::cout, chapter_source_name(document.chapter_source));
     std::cout << "\n  },\n";
+    std::cout << "  \"controller\": {\n";
+    std::cout << "    \"schema\": \"rsvp-reader-controller-v1\",\n";
+    std::cout << "    \"initial_mode\": \"title\",\n";
+    std::cout << "    \"red_awake\": \"toggle_play_pause\",\n";
+    std::cout << "    \"red_sleeping\": \"wake_to_title_without_advancing\",\n";
+    std::cout << "    \"blue\": \"reserved_menu\",\n";
+    std::cout << "    \"dpad_left\": \"previous_word_pause\",\n";
+    std::cout << "    \"dpad_right\": \"next_word_pause\",\n";
+    std::cout << "    \"dpad_hold_left\": \"context_previous_word_pause\",\n";
+    std::cout << "    \"dpad_hold_right\": \"context_next_word_pause\",\n";
+    std::cout << "    \"dpad_hold_end\": \"return_to_rsvp_paused\",\n";
+    std::cout << "    \"dpad_up\": \"wpm_plus_step\",\n";
+    std::cout << "    \"dpad_down\": \"wpm_minus_step\",\n";
+    std::cout << "    \"wpm_step\": 25,\n";
+    std::cout << "    \"min_wpm\": " << PlaybackEngine::kMinWpm << ",\n";
+    std::cout << "    \"max_wpm\": " << PlaybackEngine::kMaxWpm << "\n";
+    std::cout << "  },\n";
     std::cout << "  \"max_codepoints_per_frame\": " << options.max_codepoints_per_frame
               << ",\n";
     std::cout << "  \"chapters\": [\n";

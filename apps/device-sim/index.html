@@ -601,16 +601,6 @@
         width: 148px;
         height: 148px;
       }
-
-      .round-button {
-        width: 54px;
-        height: 54px;
-      }
-
-      .round-button::before {
-        width: 34px;
-        height: 34px;
-      }
     }
 
     @media (max-width: 430px) {
@@ -841,9 +831,29 @@
       return Math.max(0, Math.floor((codepointCount - 1) / 2));
     }
 
+    function isValidControllerContract(controller) {
+      return controller &&
+        controller.schema === "rsvp-reader-controller-v1" &&
+        controller.initial_mode === "title" &&
+        controller.red_awake === "toggle_play_pause" &&
+        controller.red_sleeping === "wake_to_title_without_advancing" &&
+        controller.blue === "reserved_menu" &&
+        controller.dpad_left === "previous_word_pause" &&
+        controller.dpad_right === "next_word_pause" &&
+        controller.dpad_hold_left === "context_previous_word_pause" &&
+        controller.dpad_hold_right === "context_next_word_pause" &&
+        controller.dpad_hold_end === "return_to_rsvp_paused" &&
+        controller.dpad_up === "wpm_plus_step" &&
+        controller.dpad_down === "wpm_minus_step" &&
+        controller.wpm_step === 25 &&
+        controller.min_wpm === 100 &&
+        controller.max_wpm === 600;
+    }
+
     function isValidFrameData(candidate) {
       return candidate &&
         candidate.schema === frameOptions.schema &&
+        isValidControllerContract(candidate.controller) &&
         (!candidate.chapters || (
           Array.isArray(candidate.chapters) &&
           candidate.chapters.every((chapter, index) =>
@@ -1300,9 +1310,11 @@
         state.contextView = false;
         state.titleCard = isChapterStart(state.index);
       } else if (action === "faster") {
-        state.wpm = Math.min(600, state.wpm + 25);
+        state.wpm = Math.min(frameData.controller.max_wpm,
+          state.wpm + frameData.controller.wpm_step);
       } else if (action === "slower") {
-        state.wpm = Math.max(100, state.wpm - 25);
+        state.wpm = Math.max(frameData.controller.min_wpm,
+          state.wpm - frameData.controller.wpm_step);
       } else if (action === "sleep") {
         state.playing = false;
         state.contextView = false;

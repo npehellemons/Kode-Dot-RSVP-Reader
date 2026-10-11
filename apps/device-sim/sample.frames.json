@@ -7,6 +7,23 @@
     "metadata_confidence": "explicit_metadata",
     "chapter_source": "explicit_headings"
   },
+  "controller": {
+    "schema": "rsvp-reader-controller-v1",
+    "initial_mode": "title",
+    "red_awake": "toggle_play_pause",
+    "red_sleeping": "wake_to_title_without_advancing",
+    "blue": "reserved_menu",
+    "dpad_left": "previous_word_pause",
+    "dpad_right": "next_word_pause",
+    "dpad_hold_left": "context_previous_word_pause",
+    "dpad_hold_right": "context_next_word_pause",
+    "dpad_hold_end": "return_to_rsvp_paused",
+    "dpad_up": "wpm_plus_step",
+    "dpad_down": "wpm_minus_step",
+    "wpm_step": 25,
+    "min_wpm": 100,
+    "max_wpm": 600
+  },
   "max_codepoints_per_frame": 16,
   "chapters": [
     {
@@ -46,7 +63,9 @@
       "centered_fallback": false,
       "continuation_before": false,
       "continuation_after": false,
-      "punctuation_flags": ["paragraph_break_before"]
+      "punctuation_flags": [
+        "paragraph_break_before"
+      ]
     },
     {
       "index": 1,
@@ -172,7 +191,9 @@
       "centered_fallback": false,
       "continuation_before": false,
       "continuation_after": false,
-      "punctuation_flags": ["sentence_end"]
+      "punctuation_flags": [
+        "sentence_end"
+      ]
     },
     {
       "index": 7,
@@ -466,7 +487,9 @@
       "centered_fallback": false,
       "continuation_before": false,
       "continuation_after": false,
-      "punctuation_flags": ["sentence_end"]
+      "punctuation_flags": [
+        "sentence_end"
+      ]
     },
     {
       "index": 21,
@@ -676,7 +699,9 @@
       "centered_fallback": false,
       "continuation_before": false,
       "continuation_after": false,
-      "punctuation_flags": ["sentence_end"]
+      "punctuation_flags": [
+        "sentence_end"
+      ]
     },
     {
       "index": 31,
@@ -697,7 +722,9 @@
       "centered_fallback": false,
       "continuation_before": false,
       "continuation_after": false,
-      "punctuation_flags": ["paragraph_break_before"]
+      "punctuation_flags": [
+        "paragraph_break_before"
+      ]
     },
     {
       "index": 32,
@@ -928,7 +955,9 @@
       "centered_fallback": false,
       "continuation_before": false,
       "continuation_after": false,
-      "punctuation_flags": ["sentence_end"]
+      "punctuation_flags": [
+        "sentence_end"
+      ]
     },
     {
       "index": 43,
@@ -1180,7 +1209,9 @@
       "centered_fallback": false,
       "continuation_before": false,
       "continuation_after": false,
-      "punctuation_flags": ["sentence_end"]
+      "punctuation_flags": [
+        "sentence_end"
+      ]
     }
   ]
 }
