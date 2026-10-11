@@ -57,6 +57,14 @@ target_include_directories(rsvp_lifecycle PUBLIC
 )
 target_link_libraries(rsvp_lifecycle PUBLIC rsvp_controller rsvp_playback rsvp_storage)
 
+add_library(rsvp_platform
+    components/platform/src/input_contract.cpp
+)
+target_include_directories(rsvp_platform PUBLIC
+    components/platform/include
+)
+target_link_libraries(rsvp_platform PUBLIC rsvp_controller)
+
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
@@ -77,7 +85,11 @@ if(BUILD_TESTING)
     add_executable(rsvp_core_tests
         tests/core_tests.cpp
     )
-    target_link_libraries(rsvp_core_tests PRIVATE rsvp_lifecycle rsvp_library rsvp_controller)
+    target_link_libraries(rsvp_core_tests PRIVATE
+        rsvp_lifecycle
+        rsvp_library
+        rsvp_platform
+    )
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
     add_test(NAME rsvp_controller_trace COMMAND rsvp_controller_trace)
     if(Python3_FOUND)

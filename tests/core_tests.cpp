@@ -3,6 +3,7 @@
 #include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
+#include "rsvp/platform/input_contract.hpp"
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
@@ -64,6 +65,13 @@ using rsvp::text::utf8_codepoint_count;
 using rsvp::controller::ReaderController;
 using rsvp::controller::ReaderDisplayMode;
 using rsvp::controller::ReaderInput;
+using rsvp::platform::ControlEvent;
+using rsvp::platform::ControlPhase;
+using rsvp::platform::LifecycleEvent;
+using rsvp::platform::LifecycleSignal;
+using rsvp::platform::PhysicalControl;
+using rsvp::platform::reader_input_for_control_event;
+using rsvp::platform::reader_input_for_lifecycle_event;
 
 int failures = 0;
 
@@ -1000,6 +1008,85 @@ void test_reader_controller_dpad_navigation_and_context_mode() {
             "dpad down decreases WPM by 25");
 }
 
+void test_platform_control_event_mapping() {
+    require(!reader_input_for_control_event(
+                ControlEvent{PhysicalControl::red_button, ControlPhase::press, 0})
+                .has_value(),
+            "platform ignores red press until release");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::red_button, ControlPhase::release, 10})
+                .value() == ReaderInput::red,
+            "platform maps red release to red input");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::touch_primary, ControlPhase::release, 10})
+                .value() == ReaderInput::red,
+            "platform maps primary touch release to red input");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::blue_button, ControlPhase::release, 10})
+                .value() == ReaderInput::blue,
+            "platform maps blue release to menu input");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_left, ControlPhase::release, 10})
+                .value() == ReaderInput::dpad_left,
+            "platform maps dpad left release");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_right, ControlPhase::release, 10})
+                .value() == ReaderInput::dpad_right,
+            "platform maps dpad right release");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_up, ControlPhase::release, 10})
+                .value() == ReaderInput::dpad_up,
+            "platform maps dpad up release");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_down, ControlPhase::release, 10})
+                .value() == ReaderInput::dpad_down,
+            "platform maps dpad down release");
+}
+
+void test_platform_hold_and_lifecycle_mapping() {
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_left, ControlPhase::hold_start, 100})
+                .value() == ReaderInput::hold_left,
+            "platform maps dpad left hold start");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_left, ControlPhase::hold_repeat, 500})
+                .value() == ReaderInput::hold_left,
+            "platform maps dpad left hold repeat");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_right, ControlPhase::hold_start, 100})
+                .value() == ReaderInput::hold_right,
+            "platform maps dpad right hold start");
+    require(reader_input_for_control_event(
+                ControlEvent{PhysicalControl::dpad_right, ControlPhase::hold_end, 600})
+                .value() == ReaderInput::hold_end,
+            "platform maps dpad hold end");
+    require(!reader_input_for_control_event(
+                ControlEvent{PhysicalControl::red_button, ControlPhase::hold_start, 100})
+                .has_value(),
+            "platform ignores red hold start");
+
+    require(reader_input_for_lifecycle_event(
+                LifecycleEvent{LifecycleSignal::sleep, 1000})
+                .value() == ReaderInput::sleep,
+            "platform maps sleep lifecycle");
+    require(reader_input_for_lifecycle_event(
+                LifecycleEvent{LifecycleSignal::suspend, 1000})
+                .value() == ReaderInput::sleep,
+            "platform maps suspend lifecycle");
+    require(reader_input_for_lifecycle_event(
+                LifecycleEvent{LifecycleSignal::exit, 1000})
+                .value() == ReaderInput::sleep,
+            "platform maps exit lifecycle");
+    require(reader_input_for_lifecycle_event(
+                LifecycleEvent{LifecycleSignal::wake, 1000})
+                .value() == ReaderInput::red,
+            "platform maps wake lifecycle");
+    require(!reader_input_for_lifecycle_event(
+                LifecycleEvent{LifecycleSignal::resume, 1000})
+                .has_value(),
+            "platform resume does not imply playback");
+}
+
 } // namespace
 
 int main() {
@@ -1037,6 +1124,8 @@ int main() {
     test_controller_restore_ignores_bookmark_for_different_document();
     test_reader_controller_red_sleep_wake_and_pause_sequence();
     test_reader_controller_dpad_navigation_and_context_mode();
+    test_platform_control_event_mapping();
+    test_platform_hold_and_lifecycle_mapping();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
