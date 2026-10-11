@@ -96,6 +96,11 @@ add_executable(rsvp_controller_trace
 )
 target_link_libraries(rsvp_controller_trace PRIVATE rsvp_controller)
 
+add_executable(rsvp_view_model_trace
+    tools/rsvp_view_model_trace.cpp
+)
+target_link_libraries(rsvp_view_model_trace PRIVATE rsvp_ui)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(rsvp_core_tests
@@ -108,6 +113,7 @@ if(BUILD_TESTING)
     )
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
     add_test(NAME rsvp_controller_trace COMMAND rsvp_controller_trace)
+    add_test(NAME rsvp_view_model_trace COMMAND rsvp_view_model_trace)
     if(Python3_FOUND)
         add_test(
             NAME device_sim_controller_trace
