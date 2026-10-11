@@ -22,6 +22,7 @@ struct BookRecord {
     ChapterSource chapter_source = ChapterSource::single_fallback;
     std::string source_path;
     std::string folder;
+    std::uintmax_t file_size_bytes = 0;
     std::uint64_t content_hash = 0;
     std::size_t chapter_count = 0;
     std::size_t frame_count = 0;
@@ -43,7 +44,17 @@ BookRecord make_book_record(
     std::uint64_t content_hash,
     std::string source_path = {},
     std::string folder = {},
-    std::string id = {});
+    std::string id = {},
+    std::uintmax_t file_size_bytes = 0);
+
+BookRecord make_book_record_from_file_metadata(
+    DocumentFormat format,
+    std::string source_path,
+    std::uintmax_t file_size_bytes,
+    std::uint64_t content_hash,
+    std::string id = {},
+    std::string title = {},
+    std::string folder = {});
 
 std::size_t chapter_index_for_frame(
     const std::vector<rsvp::text::Chapter>& chapters,

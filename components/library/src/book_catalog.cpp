@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <utility>
@@ -37,6 +38,12 @@ std::string display_title(const DocumentText& document) {
     return document.title.empty() ? "Document" : document.title;
 }
 
+std::string title_from_source_path(std::string_view source_path) {
+    const auto path = std::filesystem::path(std::string(source_path));
+    auto title = path.stem().string();
+    return title.empty() ? "Document" : title;
+}
+
 std::size_t clamped_frame_index(std::size_t frame_index, std::size_t frame_count) {
     if (frame_count == 0) {
         return 0;
@@ -66,7 +73,8 @@ BookRecord make_book_record(
     std::uint64_t content_hash,
     std::string source_path,
     std::string folder,
-    std::string id) {
+    std::string id,
+    std::uintmax_t file_size_bytes) {
     BookRecord book;
     book.id = id.empty() ? make_book_id(document, content_hash) : std::move(id);
     book.title = display_title(document);
@@ -76,11 +84,34 @@ BookRecord make_book_record(
     book.chapter_source = document.chapter_source;
     book.source_path = std::move(source_path);
     book.folder = std::move(folder);
+    book.file_size_bytes = file_size_bytes;
     book.content_hash = content_hash;
     book.chapter_count = chapters.empty() ? document.chapters.size() : chapters.size();
     book.frame_count = frames.size();
     book.resume_frame_index = 0;
     book.resume_chapter_index = chapter_index_for_frame(chapters, 0);
+    return book;
+}
+
+BookRecord make_book_record_from_file_metadata(
+    DocumentFormat format,
+    std::string source_path,
+    std::uintmax_t file_size_bytes,
+    std::uint64_t content_hash,
+    std::string id,
+    std::string title,
+    std::string folder) {
+    BookRecord book;
+    book.format = format;
+    book.title = title.empty() ? title_from_source_path(source_path) : std::move(title);
+    book.id = id.empty() ? slug_part(book.title) + "-" + to_hex(content_hash)
+                         : std::move(id);
+    book.metadata_confidence = MetadataConfidence::filename_only;
+    book.chapter_source = ChapterSource::single_fallback;
+    book.source_path = std::move(source_path);
+    book.folder = std::move(folder);
+    book.file_size_bytes = file_size_bytes;
+    book.content_hash = content_hash;
     return book;
 }
 

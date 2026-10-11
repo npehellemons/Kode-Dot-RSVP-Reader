@@ -53,6 +53,7 @@ using rsvp::library::MetadataConfidence;
 using rsvp::library::TxtImportOptions;
 using rsvp::library::folder_names;
 using rsvp::library::import_txt_document;
+using rsvp::library::make_book_record_from_file_metadata;
 using rsvp::library::make_book_id;
 using rsvp::library::make_book_record;
 using rsvp::library::make_frame_chapters;
@@ -586,6 +587,7 @@ void test_book_catalog_records_resume_and_folders() {
     require(book.format == DocumentFormat::txt, "book catalog record format");
     require(book.chapter_count == 2, "book catalog chapter count");
     require(book.frame_count == frames.size(), "book catalog frame count");
+    require(book.file_size_bytes == 0, "book catalog default file size");
     require(book.resume_chapter_index == 0, "book catalog initial chapter index");
 
     require(chapter_index_for_frame(chapters, chapters[1].first_frame_index) == 1,
@@ -613,6 +615,22 @@ void test_book_catalog_records_resume_and_folders() {
     require(detective_books.size() == 1 &&
                 detective_books[0]->id == catalog.books[0].id,
             "book catalog books in folder");
+
+    const auto epub = make_book_record_from_file_metadata(
+        DocumentFormat::epub,
+        "/books/Sherlock Images.epub",
+        4096,
+        content_hash("epub bytes"),
+        "sherlock-epub");
+    require(epub.id == "sherlock-epub", "book catalog metadata record id");
+    require(epub.title == "Sherlock Images",
+            "book catalog metadata title from filename");
+    require(epub.format == DocumentFormat::epub,
+            "book catalog metadata format");
+    require(epub.file_size_bytes == 4096,
+            "book catalog metadata file size");
+    require(epub.frame_count == 0,
+            "book catalog metadata record unparsed frame count");
 }
 
 void test_playback_advances_by_display_frame() {
@@ -1010,6 +1028,39 @@ void test_book_storage_lists_and_loads_supported_books() {
     require(stats.ready, "book storage layout stats ready");
     require(stats.book_count == 2, "book storage layout stats book count");
     require(stats.book_bytes == 20, "book storage layout stats book bytes");
+
+    const auto alpha_document =
+        import_txt_document(*loaded, books[0].source_path.string());
+    const auto alpha_frames =
+        make_display_frames(tokenize(alpha_document.reading_text_utf8));
+    const auto alpha_chapters = make_frame_chapters(alpha_document, alpha_frames);
+    auto alpha_record = make_book_record(
+        alpha_document,
+        alpha_frames,
+        alpha_chapters,
+        content_hash(alpha_document.reading_text_utf8),
+        books[0].source_path.string(),
+        {},
+        books[0].id,
+        books[0].file_size_bytes);
+    require(alpha_record.id == "alpha", "stored txt book record keeps storage id");
+    require(alpha_record.title == "alpha", "stored txt book record filename title");
+    require(alpha_record.file_size_bytes == books[0].file_size_bytes,
+            "stored txt book record carries file size");
+    require(alpha_record.frame_count == alpha_frames.size(),
+            "stored txt book record carries frame count");
+
+    const auto zeta_record = make_book_record_from_file_metadata(
+        DocumentFormat::epub,
+        books[1].source_path.string(),
+        books[1].file_size_bytes,
+        content_hash("epub bytes"),
+        books[1].id);
+    require(zeta_record.id == "zeta", "stored epub metadata record keeps id");
+    require(zeta_record.title == "zeta",
+            "stored epub metadata record filename title");
+    require(zeta_record.frame_count == 0,
+            "stored epub metadata remains unparsed");
 
     std::filesystem::remove_all(dir, error);
 }
