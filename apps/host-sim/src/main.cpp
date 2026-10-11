@@ -3,6 +3,7 @@
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
+#include "rsvp/ui/reader_view_model.hpp"
 
 #include <chrono>
 #include <csignal>
@@ -22,7 +23,6 @@
 
 namespace {
 
-using rsvp::controller::ReaderDisplayMode;
 using rsvp::controller::ReaderView;
 using rsvp::playback::PlaybackSettings;
 using rsvp::playback::PlaybackState;
@@ -39,6 +39,9 @@ using rsvp::runtime::ReaderRuntime;
 using rsvp::storage::content_hash;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
+using rsvp::ui::ReaderViewModel;
+using rsvp::ui::ReaderVisualMode;
+using rsvp::ui::make_reader_view_model;
 
 constexpr const char* kDocId = "bundled-sample-preview";
 constexpr const char* kSampleText =
@@ -151,15 +154,15 @@ const char* state_label(PlaybackState state) {
     return "unknown";
 }
 
-const char* mode_label(ReaderDisplayMode mode) {
+const char* mode_label(ReaderVisualMode mode) {
     switch (mode) {
-    case ReaderDisplayMode::title:
+    case ReaderVisualMode::title:
         return "title";
-    case ReaderDisplayMode::rsvp:
+    case ReaderVisualMode::rsvp:
         return "rsvp";
-    case ReaderDisplayMode::context:
+    case ReaderVisualMode::context:
         return "context";
-    case ReaderDisplayMode::sleep:
+    case ReaderVisualMode::sleep:
         return "sleep";
     }
     return "unknown";
@@ -212,30 +215,17 @@ std::string progress_bar(std::size_t index, std::size_t count, int width) {
     return "[" + repeat('#', filled) + repeat('-', inner_width - filled) + "]";
 }
 
-void render_context(const ReaderView& view, int columns) {
-    const auto& state = view.playback;
-    print_centered("Sentence context", columns);
+void render_context(const ReaderViewModel& model, int columns) {
+    print_centered(model.primary_text, columns);
     std::cout << '\n';
 
     std::string line;
-    const auto start = view.context.start_frame_index;
-    const auto end = view.context.end_frame_index;
-    const auto current_source = view.context.current_source_token_index;
-    if (!state.visible_frame || start > end) {
-        print_centered("", columns);
-        return;
-    }
-
-    const auto frame_count = state.frame_count;
-    for (std::size_t index = start; index <= end && index < frame_count; ++index) {
-        if (index == state.frame_index && state.visible_frame) {
-            line += "[" + state.visible_frame->text_utf8 + "] ";
-        } else if (index == state.frame_index || current_source == state.source_token_index) {
-            line += "[" + (state.visible_frame ? state.visible_frame->text_utf8 : "") + "] ";
+    for (const auto& word : model.context_words) {
+        if (word.current) {
+            line += "[" + word.text + "] ";
+        } else {
+            line += word.text + " ";
         }
-    }
-    if (line.empty() && state.visible_frame) {
-        line = "[" + state.visible_frame->text_utf8 + "]";
     }
     print_centered(line, columns);
 }
@@ -243,15 +233,9 @@ void render_context(const ReaderView& view, int columns) {
 void render(const ReaderView& view) {
     clear_screen();
 
+    const auto model = make_reader_view_model(view);
     const auto& state = view.playback;
     const auto size = terminal_size();
-    const auto word = state.visible_token ? state.visible_token->text_utf8 : std::string{};
-    const auto shown_index = state.token_count == 0 ? 0 : state.token_index + 1;
-    const auto remaining_seconds = (state.estimated_remaining_ms + 999) / 1000;
-    const auto chapter_remaining_seconds =
-        (state.estimated_chapter_remaining_ms + 999) / 1000;
-    const auto chapter_shown =
-        state.chapter_frame_count == 0 ? 0 : state.chapter_frame_index + 1;
     const int content_width = size.columns > 10 ? size.columns - 4 : size.columns;
     const int top_padding = size.rows > 14 ? (size.rows - 12) / 2 : 1;
     const int bar_width = content_width < 50 ? content_width : 50;
@@ -260,34 +244,32 @@ void render(const ReaderView& view) {
     print_centered("Kode Dot RSVP Reader", size.columns);
     std::cout << '\n';
 
-    if (view.mode == ReaderDisplayMode::sleep) {
-        print_centered("Screen sleeping", size.columns);
-    } else if (view.mode == ReaderDisplayMode::title) {
-        print_centered(state.chapter_title.empty() ? "Document" : state.chapter_title,
-                       size.columns);
-    } else if (view.mode == ReaderDisplayMode::context) {
-        render_context(view, size.columns);
+    if (model.mode == ReaderVisualMode::context) {
+        render_context(model, size.columns);
     } else {
-        print_centered(word, size.columns);
+        print_centered(model.primary_text, size.columns);
     }
     std::cout << '\n';
-    print_centered(progress_bar(state.token_index, state.token_count, bar_width), size.columns);
+    print_centered(progress_bar(model.chapter_position == 0 ? 0 : model.chapter_position - 1,
+                                model.chapter_total,
+                                bar_width),
+                   size.columns);
     std::cout << '\n';
 
     const std::string status =
-        std::string("Mode: ") + mode_label(view.mode) +
+        std::string("Mode: ") + mode_label(model.mode) +
         "    State: " + state_label(state.state) +
-        "    WPM: " + std::to_string(state.wpm) +
-        "    Token: " + std::to_string(shown_index) + "/" +
-        std::to_string(state.token_count) +
-        "    Remaining: " + std::to_string(remaining_seconds) + "s";
+        "    WPM: " + std::to_string(model.wpm) +
+        "    Token: " + std::to_string(model.frame_position) + "/" +
+        std::to_string(model.frame_total) +
+        "    Remaining: " + std::to_string(model.remaining_seconds) + "s";
     print_centered(status, size.columns);
     std::cout << '\n';
     const std::string chapter =
-        "Chapter: " + state.chapter_title + "    " +
-        std::to_string(chapter_shown) + "/" +
-        std::to_string(state.chapter_frame_count) +
-        "    Remaining: " + std::to_string(chapter_remaining_seconds) + "s";
+        "Chapter: " + model.chapter_title + "    " +
+        std::to_string(model.chapter_position) + "/" +
+        std::to_string(model.chapter_total) +
+        "    Remaining: " + std::to_string(model.chapter_remaining_seconds) + "s";
     print_centered(chapter, size.columns);
     std::cout << '\n';
     print_centered("Space red play/pause/wake   h/l word step   j/k WPM   s sleep   q quit",

@@ -8,6 +8,7 @@
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
+#include "rsvp/ui/reader_view_model.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -74,6 +75,8 @@ using rsvp::platform::PhysicalControl;
 using rsvp::platform::reader_input_for_control_event;
 using rsvp::platform::reader_input_for_lifecycle_event;
 using rsvp::runtime::ReaderRuntime;
+using rsvp::ui::ReaderVisualMode;
+using rsvp::ui::make_reader_view_model;
 
 int failures = 0;
 
@@ -1161,6 +1164,45 @@ void test_reader_runtime_lifecycle_sleep_persists() {
     std::filesystem::remove_all(dir, error);
 }
 
+void test_reader_view_model_modes_and_progress() {
+    ReaderController controller(make_display_frames(tokenize("one two three")),
+                                {},
+                                PlaybackSettings{.wpm = 300});
+
+    auto title = make_reader_view_model(controller.view());
+    require(title.mode == ReaderVisualMode::title, "view model title mode");
+    require(title.primary_text == "Document", "view model fallback title text");
+    require(title.frame_position == 1, "view model initial frame position");
+    require(title.frame_total == 3, "view model frame total");
+    require(title.chapter_position == 1, "view model initial chapter position");
+    require(title.chapter_total == 3, "view model chapter total");
+    require(title.wpm == 300, "view model WPM");
+
+    controller.handle_input(ReaderInput::red, 0);
+    auto rsvp = make_reader_view_model(controller.view());
+    require(rsvp.mode == ReaderVisualMode::rsvp, "view model RSVP mode");
+    require(rsvp.primary_text == "one", "view model RSVP primary text");
+    require(rsvp.playing, "view model playing flag");
+
+    controller.handle_input(ReaderInput::dpad_right, 10);
+    auto stepped = make_reader_view_model(controller.view());
+    require(stepped.paused, "view model paused flag");
+    require(stepped.frame_position == 2, "view model stepped frame position");
+    require(stepped.progress_percent == 50, "view model chapter progress percent");
+
+    controller.handle_input(ReaderInput::hold_right, 20);
+    auto context = make_reader_view_model(controller.view());
+    require(context.mode == ReaderVisualMode::context, "view model context mode");
+    require(context.primary_text == "Sentence context", "view model context title");
+    require(context.context_words.size() == 1, "view model current context word");
+    require(context.context_words[0].current, "view model context current flag");
+
+    controller.handle_input(ReaderInput::sleep, 30);
+    auto sleep = make_reader_view_model(controller.view());
+    require(sleep.mode == ReaderVisualMode::sleep, "view model sleep mode");
+    require(sleep.primary_text == "Screen sleeping", "view model sleep text");
+}
+
 } // namespace
 
 int main() {
@@ -1202,6 +1244,7 @@ int main() {
     test_platform_hold_and_lifecycle_mapping();
     test_reader_runtime_persists_control_events_and_restores();
     test_reader_runtime_lifecycle_sleep_persists();
+    test_reader_view_model_modes_and_progress();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
