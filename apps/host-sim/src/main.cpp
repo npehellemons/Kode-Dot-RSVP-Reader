@@ -1,6 +1,6 @@
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
-#include "rsvp/playback/display_adapter.hpp"
+#include "rsvp/platform/input_contract.hpp"
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
@@ -23,23 +23,27 @@
 
 namespace {
 
-using rsvp::playback::DisplayAdapter;
-using rsvp::playback::DisplayState;
+using rsvp::controller::ReaderController;
+using rsvp::controller::ReaderDisplayMode;
+using rsvp::controller::ReaderView;
 using rsvp::playback::PlaybackSettings;
 using rsvp::playback::PlaybackState;
 using rsvp::lifecycle::DocumentIdentity;
 using rsvp::lifecycle::ReaderStatePaths;
-using rsvp::lifecycle::bookmark_matches_document;
 using rsvp::lifecycle::capture_reader_state;
 using rsvp::lifecycle::pause_and_persist_for_sleep;
 using rsvp::lifecycle::persist_reader_state;
-using rsvp::lifecycle::resolve_bookmark_frame;
-using rsvp::lifecycle::to_playback_settings;
+using rsvp::lifecycle::restore_reader_controller;
 using rsvp::library::import_txt_document;
 using rsvp::library::make_frame_chapters;
+using rsvp::platform::ControlEvent;
+using rsvp::platform::ControlPhase;
+using rsvp::platform::LifecycleEvent;
+using rsvp::platform::LifecycleSignal;
+using rsvp::platform::PhysicalControl;
+using rsvp::platform::reader_input_for_control_event;
+using rsvp::platform::reader_input_for_lifecycle_event;
 using rsvp::storage::content_hash;
-using rsvp::storage::load_bookmark;
-using rsvp::storage::load_settings;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
 
@@ -132,12 +136,11 @@ std::uint64_t wall_time_seconds() {
 }
 
 void save_preview_state(const std::filesystem::path& dir,
-                        const DisplayAdapter& adapter,
+                        const ReaderController& controller,
                         const DocumentIdentity& document) {
     persist_reader_state(
         {dir / "settings.state", dir / "bookmark.state"},
-        capture_reader_state(document, adapter.snapshot(), adapter.settings(),
-                             wall_time_seconds()));
+        capture_reader_state(document, controller, wall_time_seconds()));
 }
 
 TerminalSize terminal_size() {
@@ -159,6 +162,20 @@ const char* state_label(PlaybackState state) {
         return "paused";
     case PlaybackState::finished:
         return "finished";
+    }
+    return "unknown";
+}
+
+const char* mode_label(ReaderDisplayMode mode) {
+    switch (mode) {
+    case ReaderDisplayMode::title:
+        return "title";
+    case ReaderDisplayMode::rsvp:
+        return "rsvp";
+    case ReaderDisplayMode::context:
+        return "context";
+    case ReaderDisplayMode::sleep:
+        return "sleep";
     }
     return "unknown";
 }
@@ -210,9 +227,38 @@ std::string progress_bar(std::size_t index, std::size_t count, int width) {
     return "[" + repeat('#', filled) + repeat('-', inner_width - filled) + "]";
 }
 
-void render(const DisplayState& state) {
+void render_context(const ReaderView& view, int columns) {
+    const auto& state = view.playback;
+    print_centered("Sentence context", columns);
+    std::cout << '\n';
+
+    std::string line;
+    const auto start = view.context.start_frame_index;
+    const auto end = view.context.end_frame_index;
+    const auto current_source = view.context.current_source_token_index;
+    if (!state.visible_frame || start > end) {
+        print_centered("", columns);
+        return;
+    }
+
+    const auto frame_count = state.frame_count;
+    for (std::size_t index = start; index <= end && index < frame_count; ++index) {
+        if (index == state.frame_index && state.visible_frame) {
+            line += "[" + state.visible_frame->text_utf8 + "] ";
+        } else if (index == state.frame_index || current_source == state.source_token_index) {
+            line += "[" + (state.visible_frame ? state.visible_frame->text_utf8 : "") + "] ";
+        }
+    }
+    if (line.empty() && state.visible_frame) {
+        line = "[" + state.visible_frame->text_utf8 + "]";
+    }
+    print_centered(line, columns);
+}
+
+void render(const ReaderView& view) {
     clear_screen();
 
+    const auto& state = view.playback;
     const auto size = terminal_size();
     const auto word = state.visible_token ? state.visible_token->text_utf8 : std::string{};
     const auto shown_index = state.token_count == 0 ? 0 : state.token_index + 1;
@@ -228,13 +274,24 @@ void render(const DisplayState& state) {
     std::cout << repeat('\n', top_padding);
     print_centered("Kode Dot RSVP Reader", size.columns);
     std::cout << '\n';
-    print_centered(word, size.columns);
+
+    if (view.mode == ReaderDisplayMode::sleep) {
+        print_centered("Screen sleeping", size.columns);
+    } else if (view.mode == ReaderDisplayMode::title) {
+        print_centered(state.chapter_title.empty() ? "Document" : state.chapter_title,
+                       size.columns);
+    } else if (view.mode == ReaderDisplayMode::context) {
+        render_context(view, size.columns);
+    } else {
+        print_centered(word, size.columns);
+    }
     std::cout << '\n';
     print_centered(progress_bar(state.token_index, state.token_count, bar_width), size.columns);
     std::cout << '\n';
 
     const std::string status =
-        std::string("State: ") + state_label(state.state) +
+        std::string("Mode: ") + mode_label(view.mode) +
+        "    State: " + state_label(state.state) +
         "    WPM: " + std::to_string(state.wpm) +
         "    Token: " + std::to_string(shown_index) + "/" +
         std::to_string(state.token_count) +
@@ -248,26 +305,29 @@ void render(const DisplayState& state) {
         "    Remaining: " + std::to_string(chapter_remaining_seconds) + "s";
     print_centered(chapter, size.columns);
     std::cout << '\n';
-    print_centered("Space red play/pause   h/l word step   j/k WPM   r sentence   s sleep   q quit",
+    print_centered("Space red play/pause/wake   h/l word step   j/k WPM   s sleep   q quit",
                    size.columns);
     std::cout.flush();
 }
 
-void toggle_playback(DisplayAdapter& adapter) {
-    const auto now = monotonic_ms();
-    switch (adapter.snapshot().state) {
-    case PlaybackState::idle:
-        adapter.start(now);
-        break;
-    case PlaybackState::playing:
-        adapter.pause();
-        break;
-    case PlaybackState::paused:
-        adapter.resume(now);
-        break;
-    case PlaybackState::finished:
-        adapter.restart(now);
-        break;
+std::optional<ControlEvent> control_event_for_key(char key, std::uint64_t now) {
+    switch (key) {
+    case ' ':
+        return ControlEvent{PhysicalControl::red_button, ControlPhase::release, now};
+    case 'h':
+    case 'H':
+        return ControlEvent{PhysicalControl::dpad_left, ControlPhase::release, now};
+    case 'l':
+    case 'L':
+        return ControlEvent{PhysicalControl::dpad_right, ControlPhase::release, now};
+    case 'j':
+    case 'J':
+        return ControlEvent{PhysicalControl::dpad_down, ControlPhase::release, now};
+    case 'k':
+    case 'K':
+        return ControlEvent{PhysicalControl::dpad_up, ControlPhase::release, now};
+    default:
+        return std::nullopt;
     }
 }
 
@@ -285,77 +345,48 @@ int main() {
     const auto source_hash = content_hash(preview_document.normalized_text_utf8);
     const DocumentIdentity document{kDocId, source_hash};
     const ReaderStatePaths state_paths{dir / "settings.state", dir / "bookmark.state"};
-    const auto stored_settings = load_settings(dir / "settings.state");
-    const auto playback_settings =
-        stored_settings ? to_playback_settings(*stored_settings) : PlaybackSettings{};
     const auto tokens = tokenize(preview_document.reading_text_utf8);
     auto frames = make_display_frames(tokens);
     auto chapters = make_frame_chapters(preview_document, frames);
 
-    DisplayAdapter adapter(
-        frames, chapters, playback_settings,
-        [](const DisplayState& state) { render(state); });
-
-    const auto stored_bookmark = load_bookmark(dir / "bookmark.state");
-    if (stored_bookmark && bookmark_matches_document(*stored_bookmark, document)) {
-        adapter.seek(resolve_bookmark_frame(*stored_bookmark, frames), monotonic_ms());
-    }
-    adapter.emit_current();
+    auto controller = restore_reader_controller(frames, chapters, state_paths, document,
+                                                PlaybackSettings{}, monotonic_ms());
+    render(controller.view());
 
     bool running = true;
     while (running && !interrupted) {
         if (const auto key = read_key()) {
-            switch (*key) {
-            case ' ':
-                toggle_playback(adapter);
-                if (adapter.snapshot().state == PlaybackState::paused ||
-                    adapter.snapshot().state == PlaybackState::finished) {
-                    save_preview_state(dir, adapter, document);
-                }
-                break;
-            case 'h':
-            case 'H':
-                adapter.rewind_word(monotonic_ms());
-                save_preview_state(dir, adapter, document);
-                break;
-            case 'l':
-            case 'L':
-                adapter.advance_word(monotonic_ms());
-                save_preview_state(dir, adapter, document);
-                break;
-            case 'j':
-            case 'J':
-                adapter.set_wpm(adapter.snapshot().wpm - 25);
-                save_preview_state(dir, adapter, document);
-                break;
-            case 'k':
-            case 'K':
-                adapter.set_wpm(adapter.snapshot().wpm + 25);
-                save_preview_state(dir, adapter, document);
-                break;
-            case 'r':
-            case 'R':
-                adapter.rewind_sentence(monotonic_ms());
-                save_preview_state(dir, adapter, document);
-                break;
-            case 's':
-            case 'S':
-                pause_and_persist_for_sleep(adapter, state_paths, document, wall_time_seconds());
-                break;
-            case 'q':
-            case 'Q':
+            const auto now = monotonic_ms();
+            if (*key == 'q' || *key == 'Q') {
                 running = false;
-                break;
-            default:
-                break;
+            } else if (*key == 's' || *key == 'S') {
+                if (const auto input = reader_input_for_lifecycle_event(
+                        LifecycleEvent{LifecycleSignal::sleep, now})) {
+                    controller.handle_input(*input, now);
+                    pause_and_persist_for_sleep(controller, state_paths, document,
+                                                wall_time_seconds());
+                    render(controller.view());
+                }
+            } else if (const auto event = control_event_for_key(*key, now)) {
+                if (const auto input = reader_input_for_control_event(*event)) {
+                    controller.handle_input(*input, event->monotonic_ms);
+                    render(controller.view());
+                    const auto state = controller.playback().snapshot().state;
+                    if (state == PlaybackState::paused ||
+                        state == PlaybackState::finished) {
+                        save_preview_state(dir, controller, document);
+                    }
+                }
             }
         }
 
-        adapter.tick(monotonic_ms());
+        if (controller.tick(monotonic_ms())) {
+            render(controller.view());
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
-    save_preview_state(dir, adapter, document);
+    save_preview_state(dir, controller, document);
     clear_screen();
     std::cout << "RSVP preview closed.\n";
     return 0;

@@ -68,7 +68,7 @@ target_link_libraries(rsvp_platform PUBLIC rsvp_controller)
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
-target_link_libraries(rsvp_host_preview PRIVATE rsvp_lifecycle rsvp_library)
+target_link_libraries(rsvp_host_preview PRIVATE rsvp_lifecycle rsvp_library rsvp_platform)
 
 add_executable(rsvp_frame_dump
     tools/rsvp_frame_dump.cpp
