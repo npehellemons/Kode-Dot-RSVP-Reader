@@ -1,6 +1,5 @@
-#include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
-#include "rsvp/platform/input_contract.hpp"
+#include "rsvp/runtime/reader_runtime.hpp"
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
@@ -23,17 +22,12 @@
 
 namespace {
 
-using rsvp::controller::ReaderController;
 using rsvp::controller::ReaderDisplayMode;
 using rsvp::controller::ReaderView;
 using rsvp::playback::PlaybackSettings;
 using rsvp::playback::PlaybackState;
 using rsvp::lifecycle::DocumentIdentity;
 using rsvp::lifecycle::ReaderStatePaths;
-using rsvp::lifecycle::capture_reader_state;
-using rsvp::lifecycle::pause_and_persist_for_sleep;
-using rsvp::lifecycle::persist_reader_state;
-using rsvp::lifecycle::restore_reader_controller;
 using rsvp::library::import_txt_document;
 using rsvp::library::make_frame_chapters;
 using rsvp::platform::ControlEvent;
@@ -41,8 +35,7 @@ using rsvp::platform::ControlPhase;
 using rsvp::platform::LifecycleEvent;
 using rsvp::platform::LifecycleSignal;
 using rsvp::platform::PhysicalControl;
-using rsvp::platform::reader_input_for_control_event;
-using rsvp::platform::reader_input_for_lifecycle_event;
+using rsvp::runtime::ReaderRuntime;
 using rsvp::storage::content_hash;
 using rsvp::text::make_display_frames;
 using rsvp::text::tokenize;
@@ -133,14 +126,6 @@ std::uint64_t wall_time_seconds() {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::seconds>(now).count());
-}
-
-void save_preview_state(const std::filesystem::path& dir,
-                        const ReaderController& controller,
-                        const DocumentIdentity& document) {
-    persist_reader_state(
-        {dir / "settings.state", dir / "bookmark.state"},
-        capture_reader_state(document, controller, wall_time_seconds()));
 }
 
 TerminalSize terminal_size() {
@@ -349,9 +334,9 @@ int main() {
     auto frames = make_display_frames(tokens);
     auto chapters = make_frame_chapters(preview_document, frames);
 
-    auto controller = restore_reader_controller(frames, chapters, state_paths, document,
-                                                PlaybackSettings{}, monotonic_ms());
-    render(controller.view());
+    auto runtime = ReaderRuntime::restore(frames, chapters, state_paths, document,
+                                          PlaybackSettings{}, monotonic_ms());
+    render(runtime.view());
 
     bool running = true;
     while (running && !interrupted) {
@@ -360,33 +345,23 @@ int main() {
             if (*key == 'q' || *key == 'Q') {
                 running = false;
             } else if (*key == 's' || *key == 'S') {
-                if (const auto input = reader_input_for_lifecycle_event(
-                        LifecycleEvent{LifecycleSignal::sleep, now})) {
-                    controller.handle_input(*input, now);
-                    pause_and_persist_for_sleep(controller, state_paths, document,
-                                                wall_time_seconds());
-                    render(controller.view());
-                }
+                runtime.handle_lifecycle_event(
+                    LifecycleEvent{LifecycleSignal::sleep, now}, wall_time_seconds());
+                render(runtime.view());
             } else if (const auto event = control_event_for_key(*key, now)) {
-                if (const auto input = reader_input_for_control_event(*event)) {
-                    controller.handle_input(*input, event->monotonic_ms);
-                    render(controller.view());
-                    const auto state = controller.playback().snapshot().state;
-                    if (state == PlaybackState::paused ||
-                        state == PlaybackState::finished) {
-                        save_preview_state(dir, controller, document);
-                    }
+                if (runtime.handle_control_event(*event, wall_time_seconds())) {
+                    render(runtime.view());
                 }
             }
         }
 
-        if (controller.tick(monotonic_ms())) {
-            render(controller.view());
+        if (runtime.tick(monotonic_ms())) {
+            render(runtime.view());
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
-    save_preview_state(dir, controller, document);
+    runtime.persist(wall_time_seconds());
     clear_screen();
     std::cout << "RSVP preview closed.\n";
     return 0;

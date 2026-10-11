@@ -65,10 +65,18 @@ target_include_directories(rsvp_platform PUBLIC
 )
 target_link_libraries(rsvp_platform PUBLIC rsvp_controller)
 
+add_library(rsvp_runtime
+    components/runtime/src/reader_runtime.cpp
+)
+target_include_directories(rsvp_runtime PUBLIC
+    components/runtime/include
+)
+target_link_libraries(rsvp_runtime PUBLIC rsvp_lifecycle rsvp_platform)
+
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
-target_link_libraries(rsvp_host_preview PRIVATE rsvp_lifecycle rsvp_library rsvp_platform)
+target_link_libraries(rsvp_host_preview PRIVATE rsvp_library rsvp_runtime)
 
 add_executable(rsvp_frame_dump
     tools/rsvp_frame_dump.cpp
@@ -86,9 +94,8 @@ if(BUILD_TESTING)
         tests/core_tests.cpp
     )
     target_link_libraries(rsvp_core_tests PRIVATE
-        rsvp_lifecycle
         rsvp_library
-        rsvp_platform
+        rsvp_runtime
     )
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
     add_test(NAME rsvp_controller_trace COMMAND rsvp_controller_trace)

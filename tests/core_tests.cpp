@@ -4,6 +4,7 @@
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
 #include "rsvp/platform/input_contract.hpp"
+#include "rsvp/runtime/reader_runtime.hpp"
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
@@ -72,6 +73,7 @@ using rsvp::platform::LifecycleSignal;
 using rsvp::platform::PhysicalControl;
 using rsvp::platform::reader_input_for_control_event;
 using rsvp::platform::reader_input_for_lifecycle_event;
+using rsvp::runtime::ReaderRuntime;
 
 int failures = 0;
 
@@ -1087,6 +1089,78 @@ void test_platform_hold_and_lifecycle_mapping() {
             "platform resume does not imply playback");
 }
 
+void test_reader_runtime_persists_control_events_and_restores() {
+    const std::string source = "one two three";
+    const auto frames = make_display_frames(tokenize(source));
+    const DocumentIdentity document{"runtime-control-fixture", content_hash(source)};
+    const auto dir = temp_test_dir("runtime-control");
+    const ReaderStatePaths paths{dir / "settings.state", dir / "bookmark.state"};
+
+    auto runtime = ReaderRuntime::restore(frames, {}, paths, document, {}, 1000);
+    require(runtime.view().mode == ReaderDisplayMode::title,
+            "runtime starts on title");
+
+    require(runtime.handle_control_event(
+                ControlEvent{PhysicalControl::red_button, ControlPhase::release, 1000},
+                10),
+            "runtime handles red control");
+    require(runtime.view().playback.state == PlaybackState::playing,
+            "runtime red starts playback");
+    require(runtime.tick(1240), "runtime tick advances");
+    require(runtime.handle_control_event(
+                ControlEvent{PhysicalControl::dpad_right, ControlPhase::release, 1250},
+                11),
+            "runtime handles dpad right");
+    require(runtime.view().playback.state == PlaybackState::paused,
+            "runtime dpad pauses");
+    require(runtime.view().playback.frame_index == 2,
+            "runtime dpad advances to next word");
+
+    auto restored = ReaderRuntime::restore(frames, {}, paths, document, {}, 5000);
+    require(restored.view().mode == ReaderDisplayMode::title,
+            "runtime restored to title");
+    require(restored.view().playback.state == PlaybackState::paused,
+            "runtime restored paused");
+    require(restored.view().playback.frame_index == 2,
+            "runtime restored frame");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
+void test_reader_runtime_lifecycle_sleep_persists() {
+    const std::string source = "one two three";
+    const auto frames = make_display_frames(tokenize(source));
+    const DocumentIdentity document{"runtime-lifecycle-fixture", content_hash(source)};
+    const auto dir = temp_test_dir("runtime-lifecycle");
+    const ReaderStatePaths paths{dir / "settings.state", dir / "bookmark.state"};
+
+    auto runtime = ReaderRuntime::restore(frames, {}, paths, document, {}, 0);
+    runtime.handle_control_event(
+        ControlEvent{PhysicalControl::red_button, ControlPhase::release, 0}, 1);
+    runtime.tick(240);
+
+    require(runtime.handle_lifecycle_event(
+                LifecycleEvent{LifecycleSignal::sleep, 5000}, 99),
+            "runtime handles sleep lifecycle");
+    require(runtime.view().mode == ReaderDisplayMode::sleep,
+            "runtime sleep enters sleep mode");
+    require(runtime.view().playback.state == PlaybackState::paused,
+            "runtime sleep pauses");
+    require(!runtime.tick(10000), "runtime sleeping tick does not advance");
+
+    auto restored = ReaderRuntime::restore(frames, {}, paths, document, {}, 20000);
+    require(restored.view().mode == ReaderDisplayMode::title,
+            "runtime lifecycle restore title");
+    require(restored.view().playback.frame_index == 1,
+            "runtime lifecycle restore frame");
+    require(restored.view().playback.state == PlaybackState::paused,
+            "runtime lifecycle restore paused");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 } // namespace
 
 int main() {
@@ -1126,6 +1200,8 @@ int main() {
     test_reader_controller_dpad_navigation_and_context_mode();
     test_platform_control_event_mapping();
     test_platform_hold_and_lifecycle_mapping();
+    test_reader_runtime_persists_control_events_and_restores();
+    test_reader_runtime_lifecycle_sleep_persists();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
