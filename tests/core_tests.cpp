@@ -1,6 +1,7 @@
 #include "rsvp/controller/reader_controller.hpp"
 #include "kode_dot/reader_app.hpp"
 #include "kode_dot/reader_host.hpp"
+#include "kode_dot/reader_input.hpp"
 #include "kode_dot/reader_screen.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
@@ -86,9 +87,13 @@ using kode_dot::ReaderApp;
 using kode_dot::ReaderAppBoot;
 using kode_dot::ReaderClock;
 using kode_dot::ReaderHost;
+using kode_dot::ReaderNativeControl;
+using kode_dot::ReaderNativeInputEvent;
+using kode_dot::ReaderNativePhase;
 using kode_dot::ReaderRenderer;
 using kode_dot::ReaderScreenFrame;
 using kode_dot::ReaderScreenMode;
+using kode_dot::control_event_from_native;
 using kode_dot::format_screen_duration;
 using kode_dot::make_reader_screen_frame;
 
@@ -1397,6 +1402,41 @@ void test_kode_dot_reader_screen_frame_contract() {
             "screen frame hour duration format");
 }
 
+void test_kode_dot_native_input_contract() {
+    const auto red_release = control_event_from_native(
+        ReaderNativeInputEvent{ReaderNativeControl::red_button,
+                               ReaderNativePhase::release},
+        42);
+    require(red_release.has_value(), "native red release maps to control event");
+    require(red_release->control == PhysicalControl::red_button,
+            "native red maps to platform red");
+    require(red_release->phase == ControlPhase::release,
+            "native release maps to platform release");
+    require(red_release->monotonic_ms == 42,
+            "native input preserves monotonic timestamp");
+
+    const auto hold_left = control_event_from_native(
+        ReaderNativeInputEvent{ReaderNativeControl::dpad_left,
+                               ReaderNativePhase::hold_repeat},
+        88);
+    require(hold_left.has_value(), "native hold repeat maps");
+    require(hold_left->control == PhysicalControl::dpad_left,
+            "native dpad left maps");
+    require(hold_left->phase == ControlPhase::hold_repeat,
+            "native hold repeat phase maps");
+
+    require(!control_event_from_native(
+                ReaderNativeInputEvent{ReaderNativeControl::unknown,
+                                       ReaderNativePhase::release},
+                1),
+            "unknown native control is ignored");
+    require(!control_event_from_native(
+                ReaderNativeInputEvent{ReaderNativeControl::red_button,
+                                       ReaderNativePhase::unknown},
+                1),
+            "unknown native phase is ignored");
+}
+
 void test_kode_dot_reader_host_routes_clock_and_renderer() {
     const auto dir = temp_test_dir("kode-dot-reader-host");
     const auto frames = make_display_frames(tokenize("one two three"));
@@ -1496,6 +1536,7 @@ int main() {
     test_reader_view_model_context_rejoins_split_words();
     test_kode_dot_reader_app_scaffold_routes_runtime();
     test_kode_dot_reader_screen_frame_contract();
+    test_kode_dot_native_input_contract();
     test_kode_dot_reader_host_routes_clock_and_renderer();
 
     if (failures != 0) {
