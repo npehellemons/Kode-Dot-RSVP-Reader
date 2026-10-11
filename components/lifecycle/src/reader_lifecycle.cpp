@@ -1,5 +1,7 @@
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 
+#include "rsvp/storage/book_storage.hpp"
+
 #include <algorithm>
 
 namespace rsvp::lifecycle {
@@ -88,6 +90,22 @@ bool bookmark_matches_document(const rsvp::storage::BookmarkV1& bookmark,
            bookmark.content_hash == document.content_hash;
 }
 
+std::filesystem::path resume_path_for_document(
+    const ReaderStatePaths& paths,
+    std::string_view doc_id) {
+    if (!paths.resume_dir.empty()) {
+        return paths.resume_dir /
+               (rsvp::storage::sanitize_storage_key(doc_id) + ".state");
+    }
+    return paths.bookmark_path;
+}
+
+std::filesystem::path resume_path_for_document(
+    const ReaderStatePaths& paths,
+    const DocumentIdentity& document) {
+    return resume_path_for_document(paths, document.doc_id);
+}
+
 std::size_t resolve_bookmark_frame(
     const rsvp::storage::BookmarkV1& bookmark,
     const std::vector<rsvp::text::DisplayFrame>& frames) {
@@ -119,7 +137,9 @@ std::size_t resolve_bookmark_frame(
 bool persist_reader_state(const ReaderStatePaths& paths,
                           const CapturedReaderState& state) {
     return rsvp::storage::save_settings_atomic(paths.settings_path, state.settings) &&
-           rsvp::storage::save_bookmark_atomic(paths.bookmark_path, state.bookmark);
+           rsvp::storage::save_bookmark_atomic(
+               resume_path_for_document(paths, state.bookmark.doc_id),
+               state.bookmark);
 }
 
 bool pause_and_persist_for_sleep(rsvp::playback::DisplayAdapter& adapter,
@@ -153,7 +173,11 @@ rsvp::controller::ReaderController restore_reader_controller(
         chapters,
         loaded_settings ? to_playback_settings(*loaded_settings) : fallback_settings);
 
-    const auto loaded_bookmark = rsvp::storage::load_bookmark(paths.bookmark_path);
+    auto loaded_bookmark =
+        rsvp::storage::load_bookmark(resume_path_for_document(paths, document));
+    if (!loaded_bookmark && !paths.bookmark_path.empty()) {
+        loaded_bookmark = rsvp::storage::load_bookmark(paths.bookmark_path);
+    }
     if (loaded_bookmark && bookmark_matches_document(*loaded_bookmark, document)) {
         controller.restore_paused(resolve_bookmark_frame(*loaded_bookmark, frames),
                                   monotonic_ms,

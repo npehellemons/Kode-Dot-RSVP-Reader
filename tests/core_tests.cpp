@@ -42,6 +42,7 @@ using rsvp::lifecycle::bookmark_matches_document;
 using rsvp::lifecycle::capture_reader_state;
 using rsvp::lifecycle::pause_and_persist_for_sleep;
 using rsvp::lifecycle::resolve_bookmark_frame;
+using rsvp::lifecycle::resume_path_for_document;
 using rsvp::lifecycle::restore_reader_controller;
 using rsvp::lifecycle::to_playback_settings;
 using rsvp::library::ChapterSource;
@@ -1114,6 +1115,55 @@ void test_lifecycle_sleep_pauses_persists_and_does_not_advance() {
     std::filesystem::remove_all(dir, error);
 }
 
+void test_lifecycle_persists_resume_per_document() {
+    const std::string source = "one two three four";
+    const auto frames = make_display_frames(tokenize(source));
+    const auto dir = temp_test_dir("lifecycle-per-book-resume");
+    const ReaderStatePaths paths{
+        dir / "state" / "settings.state",
+        dir / "state" / "bookmark.state",
+        dir / "state" / "resume",
+    };
+    const DocumentIdentity first{"First Book/Unsafe", content_hash(source)};
+    const DocumentIdentity second{"Second Book", content_hash(source)};
+
+    ReaderController first_controller(frames, {}, PlaybackSettings{.wpm = 300});
+    first_controller.handle_input(ReaderInput::red, 0);
+    first_controller.handle_input(ReaderInput::dpad_right, 10);
+    require(pause_and_persist_for_sleep(first_controller, paths, first, 100),
+            "first book resume persists");
+
+    ReaderController second_controller(frames, {}, PlaybackSettings{.wpm = 300});
+    second_controller.handle_input(ReaderInput::red, 0);
+    second_controller.handle_input(ReaderInput::dpad_right, 10);
+    second_controller.handle_input(ReaderInput::dpad_right, 20);
+    require(pause_and_persist_for_sleep(second_controller, paths, second, 200),
+            "second book resume persists");
+
+    const auto first_path = resume_path_for_document(paths, first);
+    const auto second_path = resume_path_for_document(paths, second);
+    require(first_path == dir / "state" / "resume" / "First-Book-Unsafe.state",
+            "per-book resume path sanitizes document id");
+    require(second_path == dir / "state" / "resume" / "Second-Book.state",
+            "per-book resume path uses document id");
+    require(std::filesystem::exists(first_path), "first per-book resume exists");
+    require(std::filesystem::exists(second_path), "second per-book resume exists");
+    require(!std::filesystem::exists(paths.bookmark_path),
+            "per-book resume does not write legacy global bookmark");
+
+    const auto restored_first = restore_reader_controller(
+        frames, {}, paths, first, PlaybackSettings{.wpm = 250}, 1000);
+    const auto restored_second = restore_reader_controller(
+        frames, {}, paths, second, PlaybackSettings{.wpm = 250}, 1000);
+    require(restored_first.view().playback.frame_index == 1,
+            "first book restores its own frame");
+    require(restored_second.view().playback.frame_index == 2,
+            "second book restores its own frame");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 void test_lifecycle_bookmark_resolution_falls_back_to_source_identity() {
     DisplayFrameOptions options;
     options.max_codepoints_per_frame = 8;
@@ -1774,10 +1824,12 @@ void test_kode_dot_native_lifecycle_contract() {
 void test_kode_dot_storage_path_contract() {
     const auto root = std::filesystem::path("/tmp/kode-dot-storage-contract");
     const auto paths = reader_state_paths_for_directory(root);
-    require(paths.settings_path == root / "settings.txt",
+    require(paths.settings_path == root / "state" / "settings.state",
             "storage contract settings path");
-    require(paths.bookmark_path == root / "bookmark.txt",
+    require(paths.bookmark_path == root / "state" / "bookmark.state",
             "storage contract bookmark path");
+    require(paths.resume_dir == root / "state" / "resume",
+            "storage contract resume directory");
 
     DirectoryReaderStorageProvider provider(root);
     const auto provided = provider.reader_state_paths();
@@ -1797,10 +1849,12 @@ void test_kode_dot_reader_boot_composes_host() {
     boot.fallback_settings = PlaybackSettings{.wpm = 325};
 
     const auto app_boot = make_reader_app_boot(storage, boot);
-    require(app_boot.state_paths.settings_path == dir / "settings.txt",
+    require(app_boot.state_paths.settings_path == dir / "state" / "settings.state",
             "reader boot settings path");
-    require(app_boot.state_paths.bookmark_path == dir / "bookmark.txt",
+    require(app_boot.state_paths.bookmark_path == dir / "state" / "bookmark.state",
             "reader boot bookmark path");
+    require(app_boot.state_paths.resume_dir == dir / "state" / "resume",
+            "reader boot resume directory");
     require(app_boot.document.doc_id == "boot-doc",
             "reader boot document id");
     require(app_boot.fallback_settings.wpm == 325,
@@ -1992,6 +2046,7 @@ int main() {
     test_book_storage_layout_paths_formats_and_stats();
     test_book_storage_lists_and_loads_supported_books();
     test_lifecycle_sleep_pauses_persists_and_does_not_advance();
+    test_lifecycle_persists_resume_per_document();
     test_lifecycle_bookmark_resolution_falls_back_to_source_identity();
     test_controller_lifecycle_sleep_persists_and_restores_paused();
     test_controller_restore_ignores_bookmark_for_different_document();

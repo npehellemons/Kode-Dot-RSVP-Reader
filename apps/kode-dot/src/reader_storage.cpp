@@ -1,5 +1,7 @@
 #include "kode_dot/reader_storage.hpp"
 
+#include "rsvp/storage/book_storage.hpp"
+
 #include <utility>
 
 namespace kode_dot {
@@ -19,9 +21,11 @@ DirectoryReaderStorageProvider::reader_state_paths() const {
 
 rsvp::lifecycle::ReaderStatePaths reader_state_paths_for_directory(
     const std::filesystem::path& root) {
+    const auto layout = rsvp::storage::make_book_storage_layout(root);
     return rsvp::lifecycle::ReaderStatePaths{
-        root / "settings.txt",
-        root / "bookmark.txt",
+        layout.settings_path,
+        layout.state_dir / "bookmark.state",
+        layout.resume_dir,
     };
 }
 

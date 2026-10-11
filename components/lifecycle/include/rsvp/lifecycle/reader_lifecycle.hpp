@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rsvp::lifecycle {
@@ -21,6 +22,7 @@ struct DocumentIdentity {
 struct ReaderStatePaths {
     std::filesystem::path settings_path;
     std::filesystem::path bookmark_path;
+    std::filesystem::path resume_dir;
 };
 
 struct CapturedReaderState {
@@ -51,6 +53,14 @@ CapturedReaderState capture_reader_state(
 
 bool bookmark_matches_document(const rsvp::storage::BookmarkV1& bookmark,
                                const DocumentIdentity& document);
+
+std::filesystem::path resume_path_for_document(
+    const ReaderStatePaths& paths,
+    std::string_view doc_id);
+
+std::filesystem::path resume_path_for_document(
+    const ReaderStatePaths& paths,
+    const DocumentIdentity& document);
 
 std::size_t resolve_bookmark_frame(
     const rsvp::storage::BookmarkV1& bookmark,
