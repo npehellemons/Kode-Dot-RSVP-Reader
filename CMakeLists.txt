@@ -84,6 +84,7 @@ target_link_libraries(rsvp_ui PUBLIC rsvp_controller)
 add_library(kode_dot_app
     apps/kode-dot/src/reader_app.cpp
     apps/kode-dot/src/reader_boot.cpp
+    apps/kode-dot/src/reader_document.cpp
     apps/kode-dot/src/reader_host.cpp
     apps/kode-dot/src/reader_input.cpp
     apps/kode-dot/src/reader_lifecycle.cpp
@@ -93,7 +94,7 @@ add_library(kode_dot_app
 target_include_directories(kode_dot_app PUBLIC
     apps/kode-dot/include
 )
-target_link_libraries(kode_dot_app PUBLIC rsvp_runtime rsvp_ui)
+target_link_libraries(kode_dot_app PUBLIC rsvp_library rsvp_runtime rsvp_ui)
 
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp

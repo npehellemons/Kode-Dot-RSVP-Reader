@@ -1,6 +1,7 @@
 #include "rsvp/controller/reader_controller.hpp"
 #include "kode_dot/reader_app.hpp"
 #include "kode_dot/reader_boot.hpp"
+#include "kode_dot/reader_document.hpp"
 #include "kode_dot/reader_host.hpp"
 #include "kode_dot/reader_input.hpp"
 #include "kode_dot/reader_lifecycle.hpp"
@@ -100,6 +101,8 @@ using kode_dot::ReaderScreenFrame;
 using kode_dot::ReaderScreenMode;
 using kode_dot::DirectoryReaderStorageProvider;
 using kode_dot::ReaderHostBoot;
+using kode_dot::make_bundled_sample_document;
+using kode_dot::make_reader_document_bundle;
 using kode_dot::control_event_from_native;
 using kode_dot::format_screen_duration;
 using kode_dot::lifecycle_event_from_native;
@@ -1551,6 +1554,79 @@ void test_kode_dot_reader_boot_composes_host() {
     std::filesystem::remove_all(dir, error);
 }
 
+void test_kode_dot_reader_document_bundle_uses_core_pipeline() {
+    const std::string source =
+        "Title: Native Sample\n"
+        "Author: Tester\n"
+        "\n"
+        "# First\n"
+        "Alpha supercalifragilisticexpialidocious.\n"
+        "\n"
+        "# Second\n"
+        "Beta gamma.";
+    const auto bundle = make_reader_document_bundle(
+        source,
+        "Tester - Native Sample.txt");
+
+    require(bundle.document.title == "Native Sample",
+            "reader document bundle title");
+    require(bundle.document.author == "Tester",
+            "reader document bundle author");
+    require(bundle.document.reading_text_utf8.find("Title:") == std::string::npos,
+            "reader document bundle hides metadata from reading stream");
+    require(bundle.frames.size() > 4,
+            "reader document bundle creates display frames");
+    require(bundle.chapters.size() == 2,
+            "reader document bundle creates chapters");
+    require(bundle.chapters[0].title == "First",
+            "reader document bundle first chapter title");
+    require(bundle.identity.doc_id == "Native Sample",
+            "reader document bundle identity title");
+    require(bundle.identity.content_hash ==
+                content_hash(bundle.document.reading_text_utf8),
+            "reader document bundle identity hash");
+}
+
+void test_kode_dot_bundled_sample_boots_reader_host() {
+    const auto dir = temp_test_dir("kode-dot-bundled-sample");
+    const auto bundle = make_bundled_sample_document();
+    DirectoryReaderStorageProvider storage(dir);
+    ReaderHostBoot boot;
+    boot.document = bundle.identity;
+    boot.fallback_settings = PlaybackSettings{.wpm = 275};
+
+    FakeReaderClock clock;
+    FakeReaderRenderer renderer;
+    auto host = make_reader_host(
+        bundle.frames,
+        bundle.chapters,
+        boot,
+        storage,
+        clock,
+        renderer);
+
+    host.render();
+    require(renderer.rendered.size() == 1,
+            "bundled sample host initial render");
+    require(renderer.rendered.back().mode == ReaderScreenMode::title,
+            "bundled sample title mode");
+    require(renderer.rendered.back().primary_text == "Chapter One",
+            "bundled sample first chapter title");
+    require(renderer.rendered.back().chapter_label == "Ch 1/2",
+            "bundled sample chapter label");
+    require(renderer.rendered.back().wpm_label == "275 WPM",
+            "bundled sample fallback WPM");
+
+    clock.monotonic = 1;
+    require(host.dispatch_control(PhysicalControl::red_button, ControlPhase::release),
+            "bundled sample starts playback");
+    require(renderer.rendered.back().mode == ReaderScreenMode::rsvp,
+            "bundled sample RSVP render");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 void test_kode_dot_reader_host_routes_clock_and_renderer() {
     const auto dir = temp_test_dir("kode-dot-reader-host");
     const auto frames = make_display_frames(tokenize("one two three"));
@@ -1654,6 +1730,8 @@ int main() {
     test_kode_dot_native_lifecycle_contract();
     test_kode_dot_storage_path_contract();
     test_kode_dot_reader_boot_composes_host();
+    test_kode_dot_reader_document_bundle_uses_core_pipeline();
+    test_kode_dot_bundled_sample_boots_reader_host();
     test_kode_dot_reader_host_routes_clock_and_renderer();
 
     if (failures != 0) {
