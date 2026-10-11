@@ -4,6 +4,7 @@
 #include "kode_dot/reader_input.hpp"
 #include "kode_dot/reader_lifecycle.hpp"
 #include "kode_dot/reader_screen.hpp"
+#include "kode_dot/reader_storage.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
@@ -96,10 +97,12 @@ using kode_dot::ReaderNativePhase;
 using kode_dot::ReaderRenderer;
 using kode_dot::ReaderScreenFrame;
 using kode_dot::ReaderScreenMode;
+using kode_dot::DirectoryReaderStorageProvider;
 using kode_dot::control_event_from_native;
 using kode_dot::format_screen_duration;
 using kode_dot::lifecycle_event_from_native;
 using kode_dot::make_reader_screen_frame;
+using kode_dot::reader_state_paths_for_directory;
 
 int failures = 0;
 
@@ -1485,6 +1488,23 @@ void test_kode_dot_native_lifecycle_contract() {
             "unknown native lifecycle is ignored");
 }
 
+void test_kode_dot_storage_path_contract() {
+    const auto root = std::filesystem::path("/tmp/kode-dot-storage-contract");
+    const auto paths = reader_state_paths_for_directory(root);
+    require(paths.settings_path == root / "settings.txt",
+            "storage contract settings path");
+    require(paths.bookmark_path == root / "bookmark.txt",
+            "storage contract bookmark path");
+
+    DirectoryReaderStorageProvider provider(root);
+    const auto provided = provider.reader_state_paths();
+    require(provider.root() == root, "storage provider root");
+    require(provided.settings_path == paths.settings_path,
+            "storage provider settings path");
+    require(provided.bookmark_path == paths.bookmark_path,
+            "storage provider bookmark path");
+}
+
 void test_kode_dot_reader_host_routes_clock_and_renderer() {
     const auto dir = temp_test_dir("kode-dot-reader-host");
     const auto frames = make_display_frames(tokenize("one two three"));
@@ -1586,6 +1606,7 @@ int main() {
     test_kode_dot_reader_screen_frame_contract();
     test_kode_dot_native_input_contract();
     test_kode_dot_native_lifecycle_contract();
+    test_kode_dot_storage_path_contract();
     test_kode_dot_reader_host_routes_clock_and_renderer();
 
     if (failures != 0) {
