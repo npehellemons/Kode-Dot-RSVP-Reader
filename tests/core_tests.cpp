@@ -1,4 +1,5 @@
 #include "rsvp/controller/reader_controller.hpp"
+#include "kode_dot/reader_app.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
@@ -79,6 +80,8 @@ using rsvp::platform::reader_input_for_lifecycle_event;
 using rsvp::runtime::ReaderRuntime;
 using rsvp::ui::ReaderVisualMode;
 using rsvp::ui::make_reader_view_model;
+using kode_dot::ReaderApp;
+using kode_dot::ReaderAppBoot;
 
 int failures = 0;
 
@@ -1269,6 +1272,45 @@ void test_reader_view_model_context_rejoins_split_words() {
             "split-word context next word");
 }
 
+void test_kode_dot_reader_app_scaffold_routes_runtime() {
+    const auto dir = temp_test_dir("kode-dot-app-scaffold");
+    const auto frames = make_display_frames(tokenize("one two three"));
+    ReaderAppBoot boot;
+    boot.state_paths = ReaderStatePaths{
+        dir / "settings.txt",
+        dir / "bookmark.txt",
+    };
+    boot.document = DocumentIdentity{"kode-dot-doc", content_hash("one two three")};
+    boot.fallback_settings = PlaybackSettings{.wpm = 300};
+
+    auto app = ReaderApp::restore(frames, {}, boot, 0);
+    auto initial = app.view_model();
+    require(initial.mode == ReaderVisualMode::title,
+            "kode dot app scaffold starts at title");
+    require(initial.wpm == 300, "kode dot app scaffold uses fallback settings");
+
+    require(app.handle_control_event(
+                ControlEvent{PhysicalControl::red_button, ControlPhase::release, 1},
+                1),
+            "kode dot app scaffold routes red control");
+    auto playing = app.view_model();
+    require(playing.mode == ReaderVisualMode::rsvp,
+            "kode dot app scaffold enters RSVP mode");
+    require(playing.playing, "kode dot app scaffold starts playback");
+
+    require(app.handle_lifecycle_event(
+                LifecycleEvent{LifecycleSignal::sleep, 1000},
+                2),
+            "kode dot app scaffold routes sleep lifecycle");
+    auto sleeping = app.view_model();
+    require(sleeping.mode == ReaderVisualMode::sleep,
+            "kode dot app scaffold enters sleep mode");
+    require(sleeping.paused, "kode dot app scaffold sleep pauses playback");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 } // namespace
 
 int main() {
@@ -1313,6 +1355,7 @@ int main() {
     test_reader_runtime_lifecycle_sleep_persists();
     test_reader_view_model_modes_and_progress();
     test_reader_view_model_context_rejoins_split_words();
+    test_kode_dot_reader_app_scaffold_routes_runtime();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";

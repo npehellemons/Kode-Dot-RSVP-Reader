@@ -81,6 +81,14 @@ target_include_directories(rsvp_ui PUBLIC
 )
 target_link_libraries(rsvp_ui PUBLIC rsvp_controller)
 
+add_library(kode_dot_app
+    apps/kode-dot/src/reader_app.cpp
+)
+target_include_directories(kode_dot_app PUBLIC
+    apps/kode-dot/include
+)
+target_link_libraries(kode_dot_app PUBLIC rsvp_runtime rsvp_ui)
+
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
@@ -107,6 +115,7 @@ if(BUILD_TESTING)
         tests/core_tests.cpp
     )
     target_link_libraries(rsvp_core_tests PRIVATE
+        kode_dot_app
         rsvp_library
         rsvp_runtime
         rsvp_ui
