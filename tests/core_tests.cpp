@@ -2,6 +2,7 @@
 #include "kode_dot/reader_app.hpp"
 #include "kode_dot/reader_host.hpp"
 #include "kode_dot/reader_input.hpp"
+#include "kode_dot/reader_lifecycle.hpp"
 #include "kode_dot/reader_screen.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
@@ -89,12 +90,15 @@ using kode_dot::ReaderClock;
 using kode_dot::ReaderHost;
 using kode_dot::ReaderNativeControl;
 using kode_dot::ReaderNativeInputEvent;
+using kode_dot::ReaderNativeLifecycleEvent;
+using kode_dot::ReaderNativeLifecycleSignal;
 using kode_dot::ReaderNativePhase;
 using kode_dot::ReaderRenderer;
 using kode_dot::ReaderScreenFrame;
 using kode_dot::ReaderScreenMode;
 using kode_dot::control_event_from_native;
 using kode_dot::format_screen_duration;
+using kode_dot::lifecycle_event_from_native;
 using kode_dot::make_reader_screen_frame;
 
 int failures = 0;
@@ -1437,6 +1441,50 @@ void test_kode_dot_native_input_contract() {
             "unknown native phase is ignored");
 }
 
+void test_kode_dot_native_lifecycle_contract() {
+    const auto sleep = lifecycle_event_from_native(
+        ReaderNativeLifecycleEvent{ReaderNativeLifecycleSignal::sleep},
+        100);
+    require(sleep.has_value(), "native sleep lifecycle maps");
+    require(sleep->signal == LifecycleSignal::sleep,
+            "native sleep maps to platform sleep");
+    require(sleep->monotonic_ms == 100,
+            "native lifecycle preserves monotonic timestamp");
+
+    const auto wake = lifecycle_event_from_native(
+        ReaderNativeLifecycleEvent{ReaderNativeLifecycleSignal::wake},
+        150);
+    require(wake.has_value(), "native wake lifecycle maps");
+    require(wake->signal == LifecycleSignal::wake,
+            "native wake maps to platform wake");
+
+    const auto suspend = lifecycle_event_from_native(
+        ReaderNativeLifecycleEvent{ReaderNativeLifecycleSignal::suspend},
+        200);
+    require(suspend.has_value(), "native suspend lifecycle maps");
+    require(suspend->signal == LifecycleSignal::suspend,
+            "native suspend maps to platform suspend");
+
+    const auto resume = lifecycle_event_from_native(
+        ReaderNativeLifecycleEvent{ReaderNativeLifecycleSignal::resume},
+        250);
+    require(resume.has_value(), "native resume lifecycle maps");
+    require(resume->signal == LifecycleSignal::resume,
+            "native resume maps to platform resume");
+
+    const auto exit = lifecycle_event_from_native(
+        ReaderNativeLifecycleEvent{ReaderNativeLifecycleSignal::exit},
+        300);
+    require(exit.has_value(), "native exit lifecycle maps");
+    require(exit->signal == LifecycleSignal::exit,
+            "native exit maps to platform exit");
+
+    require(!lifecycle_event_from_native(
+                ReaderNativeLifecycleEvent{ReaderNativeLifecycleSignal::unknown},
+                1),
+            "unknown native lifecycle is ignored");
+}
+
 void test_kode_dot_reader_host_routes_clock_and_renderer() {
     const auto dir = temp_test_dir("kode-dot-reader-host");
     const auto frames = make_display_frames(tokenize("one two three"));
@@ -1537,6 +1585,7 @@ int main() {
     test_kode_dot_reader_app_scaffold_routes_runtime();
     test_kode_dot_reader_screen_frame_contract();
     test_kode_dot_native_input_contract();
+    test_kode_dot_native_lifecycle_contract();
     test_kode_dot_reader_host_routes_clock_and_renderer();
 
     if (failures != 0) {

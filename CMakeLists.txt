@@ -85,6 +85,7 @@ add_library(kode_dot_app
     apps/kode-dot/src/reader_app.cpp
     apps/kode-dot/src/reader_host.cpp
     apps/kode-dot/src/reader_input.cpp
+    apps/kode-dot/src/reader_lifecycle.cpp
     apps/kode-dot/src/reader_screen.cpp
 )
 target_include_directories(kode_dot_app PUBLIC
