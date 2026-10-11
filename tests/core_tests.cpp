@@ -14,6 +14,7 @@
 #include "rsvp/playback/playback_engine.hpp"
 #include "rsvp/platform/input_contract.hpp"
 #include "rsvp/runtime/reader_runtime.hpp"
+#include "rsvp/storage/book_storage.hpp"
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
@@ -95,6 +96,13 @@ using rsvp::platform::PhysicalControl;
 using rsvp::platform::reader_input_for_control_event;
 using rsvp::platform::reader_input_for_lifecycle_event;
 using rsvp::runtime::ReaderRuntime;
+using rsvp::storage::StoredBookFormat;
+using rsvp::storage::imported_book_path;
+using rsvp::storage::make_book_storage_layout;
+using rsvp::storage::make_storage_stats;
+using rsvp::storage::resume_path_for_book;
+using rsvp::storage::sanitize_storage_key;
+using rsvp::storage::stored_book_format_for_path;
 using rsvp::ui::ReaderVisualMode;
 using rsvp::ui::SettingsMenuItem;
 using rsvp::ui::make_main_menu_model;
@@ -903,6 +911,51 @@ void test_bookmark_serialization_hash_and_atomic_load() {
         corrupt << "schema_version=1\ncontent_hash=" << to_hex(hash) << '\n';
     }
     require(!load_bookmark(path).has_value(), "corrupt bookmark is rejected");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
+void test_book_storage_layout_paths_formats_and_stats() {
+    const auto dir = temp_test_dir("book-storage-layout");
+    const auto layout = make_book_storage_layout(dir);
+
+    require(layout.books_dir == dir / "books", "book storage books directory");
+    require(layout.state_dir == dir / "state", "book storage state directory");
+    require(layout.resume_dir == dir / "state" / "resume",
+            "book storage resume directory");
+    require(layout.catalog_path == dir / "state" / "catalog.state",
+            "book storage catalog path");
+    require(layout.settings_path == dir / "state" / "settings.state",
+            "book storage settings path");
+
+    require(sanitize_storage_key("../A Weird Book!.txt") == "A-Weird-Book-.txt",
+            "book storage sanitizes unsafe key characters");
+    require(resume_path_for_book(layout, "../A Weird Book!.txt") ==
+                dir / "state" / "resume" / "A-Weird-Book-.txt.state",
+            "book storage resume path cannot escape resume dir");
+    require(imported_book_path(layout, "Sherlock Holmes", StoredBookFormat::txt) ==
+                dir / "books" / "Sherlock-Holmes.txt",
+            "book storage imported txt path");
+    require(imported_book_path(layout, "Sherlock Holmes", StoredBookFormat::epub) ==
+                dir / "books" / "Sherlock-Holmes.epub",
+            "book storage imported epub path");
+
+    const auto txt = stored_book_format_for_path("book.TXT");
+    const auto epub = stored_book_format_for_path("book.epub");
+    const auto unsupported = stored_book_format_for_path("book.pdf");
+    require(txt && *txt == StoredBookFormat::txt,
+            "book storage detects txt extension");
+    require(epub && *epub == StoredBookFormat::epub,
+            "book storage detects epub extension");
+    require(!unsupported.has_value(), "book storage rejects unsupported extension");
+
+    const auto stats = make_storage_stats(dir, 2, 12345);
+    require(stats.ready, "book storage stats ready");
+    require(stats.capacity_bytes > 0, "book storage stats capacity");
+    require(stats.book_count == 2, "book storage stats book count");
+    require(stats.book_bytes == 12345, "book storage stats book bytes");
+    require(stats.status == "Storage ready", "book storage stats status");
 
     std::error_code error;
     std::filesystem::remove_all(dir, error);
@@ -1832,6 +1885,7 @@ int main() {
     test_playback_exports_frame_navigation_targets();
     test_settings_serialization_and_atomic_load();
     test_bookmark_serialization_hash_and_atomic_load();
+    test_book_storage_layout_paths_formats_and_stats();
     test_lifecycle_sleep_pauses_persists_and_does_not_advance();
     test_lifecycle_bookmark_resolution_falls_back_to_source_identity();
     test_controller_lifecycle_sleep_persists_and_restores_paused();

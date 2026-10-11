@@ -36,6 +36,7 @@ target_include_directories(rsvp_library PUBLIC
 target_link_libraries(rsvp_library PUBLIC rsvp_text)
 
 add_library(rsvp_storage
+    components/storage/src/book_storage.cpp
     components/storage/src/state_store.cpp
 )
 target_include_directories(rsvp_storage PUBLIC
