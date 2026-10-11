@@ -250,6 +250,21 @@ SentenceContextWindow PlaybackEngine::current_sentence_context() const {
     return sentence_context_for_frame(snapshot_.frame_index);
 }
 
+std::vector<rsvp::text::DisplayFrame> PlaybackEngine::frames_for_context(
+    const SentenceContextWindow& context) const {
+    std::vector<rsvp::text::DisplayFrame> frames;
+    if (frames_.empty() || context.start_frame_index > context.end_frame_index) {
+        return frames;
+    }
+
+    const auto start = std::min(context.start_frame_index, frames_.size() - 1);
+    const auto end = std::min(context.end_frame_index, frames_.size() - 1);
+    for (std::size_t index = start; index <= end; ++index) {
+        frames.push_back(frames_[index]);
+    }
+    return frames;
+}
+
 FrameNavigation PlaybackEngine::navigation_for_frame(std::size_t frame_index) const {
     FrameNavigation navigation;
     if (frames_.empty()) {

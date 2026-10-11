@@ -1,6 +1,7 @@
 #include "rsvp/ui/reader_view_model.hpp"
 
 #include <algorithm>
+#include <string>
 
 namespace rsvp::ui {
 namespace {
@@ -21,6 +22,14 @@ ReaderVisualMode visual_mode(rsvp::controller::ReaderDisplayMode mode) {
 
 std::uint64_t ceil_ms_to_seconds(std::uint64_t ms) {
     return (ms + 999U) / 1000U;
+}
+
+std::string context_word_text(const rsvp::text::DisplayFrame& frame) {
+    auto text = frame.text_utf8;
+    if (frame.continuation_after && !text.empty() && text.back() == '-') {
+        text.pop_back();
+    }
+    return text;
 }
 
 } // namespace
@@ -66,8 +75,17 @@ ReaderViewModel make_reader_view_model(const rsvp::controller::ReaderView& view)
         break;
     case ReaderVisualMode::context:
         model.primary_text = "Sentence context";
-        if (state.visible_frame) {
-            model.context_words.push_back({state.visible_frame->text_utf8, true});
+        {
+            std::size_t last_source_token = static_cast<std::size_t>(-1);
+            for (const auto& frame : view.context_frames) {
+                if (frame.source_token_index == last_source_token) {
+                    continue;
+                }
+                last_source_token = frame.source_token_index;
+                model.context_words.push_back(
+                    {context_word_text(frame),
+                     frame.source_token_index == view.context.current_source_token_index});
+            }
         }
         break;
     }

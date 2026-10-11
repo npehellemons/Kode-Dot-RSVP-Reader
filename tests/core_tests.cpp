@@ -636,6 +636,10 @@ void test_playback_sentence_context_window() {
             "context includes previous sentence start");
     require(context.end_frame_index == 5,
             "context includes next sentence end");
+    const auto context_frames = engine.frames_for_context(context);
+    require(context_frames.size() == 6, "context frames expose full window");
+    require(context_frames.front().text_utf8 == "First", "context frames first text");
+    require(context_frames.back().text_utf8 == "three.", "context frames last text");
 
     const auto first_context = engine.sentence_context_for_frame(0);
     require(first_context.start_frame_index == 0,
@@ -1194,8 +1198,11 @@ void test_reader_view_model_modes_and_progress() {
     auto context = make_reader_view_model(controller.view());
     require(context.mode == ReaderVisualMode::context, "view model context mode");
     require(context.primary_text == "Sentence context", "view model context title");
-    require(context.context_words.size() == 1, "view model current context word");
-    require(context.context_words[0].current, "view model context current flag");
+    require(context.context_words.size() == 3, "view model context words");
+    require(context.context_words[0].text == "one", "view model context first word");
+    require(context.context_words[1].text == "two", "view model context second word");
+    require(context.context_words[2].text == "three", "view model context third word");
+    require(context.context_words[2].current, "view model context current flag");
 
     controller.handle_input(ReaderInput::sleep, 30);
     auto sleep = make_reader_view_model(controller.view());

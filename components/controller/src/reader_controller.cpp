@@ -18,6 +18,7 @@ ReaderView ReaderController::view() const {
     current.mode = mode_;
     current.playback = playback_.snapshot();
     current.context = playback_.current_sentence_context();
+    current.context_frames = playback_.frames_for_context(current.context);
     return current;
 }
 

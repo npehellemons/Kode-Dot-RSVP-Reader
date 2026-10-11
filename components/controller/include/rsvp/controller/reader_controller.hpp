@@ -32,6 +32,7 @@ struct ReaderView {
     ReaderDisplayMode mode = ReaderDisplayMode::title;
     rsvp::playback::DisplayState playback;
     rsvp::playback::SentenceContextWindow context;
+    std::vector<rsvp::text::DisplayFrame> context_frames;
 };
 
 class ReaderController {

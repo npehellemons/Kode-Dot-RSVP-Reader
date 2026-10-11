@@ -94,6 +94,8 @@ public:
     std::uint64_t duration_for_index(std::size_t frame_index) const;
     SentenceContextWindow sentence_context_for_frame(std::size_t frame_index) const;
     SentenceContextWindow current_sentence_context() const;
+    std::vector<rsvp::text::DisplayFrame> frames_for_context(
+        const SentenceContextWindow& context) const;
     FrameNavigation navigation_for_frame(std::size_t frame_index) const;
 
     static constexpr int kMinWpm = 100;
