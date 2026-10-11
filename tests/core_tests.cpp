@@ -98,10 +98,13 @@ using rsvp::platform::reader_input_for_lifecycle_event;
 using rsvp::runtime::ReaderRuntime;
 using rsvp::storage::StoredBookFormat;
 using rsvp::storage::imported_book_path;
+using rsvp::storage::list_stored_book_files;
+using rsvp::storage::load_stored_book_bytes;
 using rsvp::storage::make_book_storage_layout;
 using rsvp::storage::make_storage_stats;
 using rsvp::storage::resume_path_for_book;
 using rsvp::storage::sanitize_storage_key;
+using rsvp::storage::storage_stats_for_layout;
 using rsvp::storage::stored_book_format_for_path;
 using rsvp::ui::ReaderVisualMode;
 using rsvp::ui::SettingsMenuItem;
@@ -958,6 +961,56 @@ void test_book_storage_layout_paths_formats_and_stats() {
     require(stats.status == "Storage ready", "book storage stats status");
 
     std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
+void test_book_storage_lists_and_loads_supported_books() {
+    const auto dir = temp_test_dir("book-storage-files");
+    const auto layout = make_book_storage_layout(dir);
+    std::error_code error;
+    std::filesystem::create_directories(layout.books_dir, error);
+    require(!error, "book storage test creates books directory");
+
+    {
+        std::ofstream(layout.books_dir / "zeta.epub", std::ios::binary | std::ios::trunc)
+            << "epub bytes";
+        std::ofstream(layout.books_dir / "alpha.txt", std::ios::binary | std::ios::trunc)
+            << "alpha text";
+        std::ofstream(layout.books_dir / "ignored.pdf", std::ios::binary | std::ios::trunc)
+            << "pdf";
+    }
+    std::filesystem::create_directories(layout.books_dir / "folder.txt", error);
+    error.clear();
+
+    const auto books = list_stored_book_files(layout);
+    require(books.size() == 2, "book storage lists supported books only");
+    require(books[0].id == "alpha", "book storage sorts by id");
+    require(books[0].format == StoredBookFormat::txt,
+            "book storage listed txt format");
+    require(books[0].file_size_bytes == 10,
+            "book storage listed txt size");
+    require(books[1].id == "zeta", "book storage second sorted id");
+    require(books[1].format == StoredBookFormat::epub,
+            "book storage listed epub format");
+
+    const auto loaded = load_stored_book_bytes(books[0]);
+    require(loaded && *loaded == "alpha text",
+            "book storage loads raw book bytes");
+
+    const auto unsupported = rsvp::storage::StoredBookFile{
+        "ignored",
+        StoredBookFormat::txt,
+        layout.books_dir / "ignored.pdf",
+        0,
+    };
+    require(!load_stored_book_bytes(unsupported).has_value(),
+            "book storage refuses unsupported source path");
+
+    const auto stats = storage_stats_for_layout(layout);
+    require(stats.ready, "book storage layout stats ready");
+    require(stats.book_count == 2, "book storage layout stats book count");
+    require(stats.book_bytes == 20, "book storage layout stats book bytes");
+
     std::filesystem::remove_all(dir, error);
 }
 
@@ -1886,6 +1939,7 @@ int main() {
     test_settings_serialization_and_atomic_load();
     test_bookmark_serialization_hash_and_atomic_load();
     test_book_storage_layout_paths_formats_and_stats();
+    test_book_storage_lists_and_loads_supported_books();
     test_lifecycle_sleep_pauses_persists_and_does_not_advance();
     test_lifecycle_bookmark_resolution_falls_back_to_source_identity();
     test_controller_lifecycle_sleep_persists_and_restores_paused();

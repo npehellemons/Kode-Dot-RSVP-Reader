@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <sstream>
 #include <system_error>
+#include <utility>
 
 namespace rsvp::storage {
 namespace {
@@ -23,6 +26,10 @@ std::filesystem::path existing_space_target(std::filesystem::path path) {
         error.clear();
     }
     return path.empty() ? std::filesystem::current_path(error) : path;
+}
+
+std::string book_id_from_path(const std::filesystem::path& path) {
+    return sanitize_storage_key(path.stem().string());
 }
 
 } // namespace
@@ -123,6 +130,77 @@ StorageStats make_storage_stats(
         space.capacity >= space.free ? space.capacity - space.free : 0;
     stats.status = "Storage ready";
     return stats;
+}
+
+std::vector<StoredBookFile> list_stored_book_files(
+    const BookStorageLayout& layout) {
+    std::vector<StoredBookFile> books;
+    std::error_code error;
+    if (!std::filesystem::exists(layout.books_dir, error) ||
+        !std::filesystem::is_directory(layout.books_dir, error)) {
+        return books;
+    }
+
+    for (const auto& entry :
+         std::filesystem::directory_iterator(layout.books_dir, error)) {
+        if (error) {
+            break;
+        }
+        if (!entry.is_regular_file(error)) {
+            error.clear();
+            continue;
+        }
+
+        const auto format = stored_book_format_for_path(entry.path());
+        if (!format) {
+            continue;
+        }
+
+        StoredBookFile book;
+        book.id = book_id_from_path(entry.path());
+        book.format = *format;
+        book.source_path = entry.path();
+        book.file_size_bytes = entry.file_size(error);
+        if (error) {
+            error.clear();
+            book.file_size_bytes = 0;
+        }
+        books.push_back(std::move(book));
+    }
+
+    std::sort(books.begin(), books.end(),
+              [](const StoredBookFile& lhs, const StoredBookFile& rhs) {
+                  return lhs.id < rhs.id;
+              });
+    return books;
+}
+
+std::optional<std::string> load_stored_book_bytes(
+    const StoredBookFile& book) {
+    if (!stored_book_format_for_path(book.source_path)) {
+        return std::nullopt;
+    }
+
+    std::ifstream stream(book.source_path, std::ios::binary);
+    if (!stream) {
+        return std::nullopt;
+    }
+
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    if (!stream.good() && !stream.eof()) {
+        return std::nullopt;
+    }
+    return buffer.str();
+}
+
+StorageStats storage_stats_for_layout(const BookStorageLayout& layout) {
+    const auto books = list_stored_book_files(layout);
+    std::uintmax_t book_bytes = 0;
+    for (const auto& book : books) {
+        book_bytes += book.file_size_bytes;
+    }
+    return make_storage_stats(layout.root, books.size(), book_bytes);
 }
 
 } // namespace rsvp::storage

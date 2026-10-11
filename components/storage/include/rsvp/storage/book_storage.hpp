@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rsvp::storage {
 
@@ -63,5 +64,13 @@ StorageStats make_storage_stats(
     const std::filesystem::path& root,
     std::size_t book_count,
     std::uintmax_t book_bytes);
+
+std::vector<StoredBookFile> list_stored_book_files(
+    const BookStorageLayout& layout);
+
+std::optional<std::string> load_stored_book_bytes(
+    const StoredBookFile& book);
+
+StorageStats storage_stats_for_layout(const BookStorageLayout& layout);
 
 } // namespace rsvp::storage
