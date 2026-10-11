@@ -1,5 +1,6 @@
 #include "rsvp/controller/reader_controller.hpp"
 #include "kode_dot/reader_app.hpp"
+#include "kode_dot/reader_host.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
@@ -82,6 +83,9 @@ using rsvp::ui::ReaderVisualMode;
 using rsvp::ui::make_reader_view_model;
 using kode_dot::ReaderApp;
 using kode_dot::ReaderAppBoot;
+using kode_dot::ReaderClock;
+using kode_dot::ReaderHost;
+using kode_dot::ReaderRenderer;
 
 int failures = 0;
 
@@ -1311,6 +1315,78 @@ void test_kode_dot_reader_app_scaffold_routes_runtime() {
     std::filesystem::remove_all(dir, error);
 }
 
+class FakeReaderClock : public ReaderClock {
+public:
+    std::uint64_t monotonic = 0;
+    std::uint64_t state_timestamp = 0;
+
+    std::uint64_t monotonic_ms() const override {
+        return monotonic;
+    }
+
+    std::uint64_t state_timestamp_ms() const override {
+        return state_timestamp;
+    }
+};
+
+class FakeReaderRenderer : public ReaderRenderer {
+public:
+    std::vector<rsvp::ui::ReaderViewModel> rendered;
+
+    void render(const rsvp::ui::ReaderViewModel& model) override {
+        rendered.push_back(model);
+    }
+};
+
+void test_kode_dot_reader_host_routes_clock_and_renderer() {
+    const auto dir = temp_test_dir("kode-dot-reader-host");
+    const auto frames = make_display_frames(tokenize("one two three"));
+    ReaderAppBoot boot;
+    boot.state_paths = ReaderStatePaths{
+        dir / "settings.txt",
+        dir / "bookmark.txt",
+    };
+    boot.document = DocumentIdentity{"kode-dot-host-doc", content_hash("one two three")};
+    boot.fallback_settings = PlaybackSettings{.wpm = 300};
+
+    FakeReaderClock clock;
+    FakeReaderRenderer renderer;
+    auto app = ReaderApp::restore(frames, {}, boot, clock.monotonic);
+    ReaderHost host(std::move(app), clock, renderer);
+
+    host.render();
+    require(renderer.rendered.size() == 1,
+            "reader host initial render called");
+    require(renderer.rendered.back().mode == ReaderVisualMode::title,
+            "reader host initial render title");
+
+    clock.monotonic = 1;
+    clock.state_timestamp = 10;
+    require(host.dispatch_control(PhysicalControl::red_button, ControlPhase::release),
+            "reader host routes control event");
+    require(renderer.rendered.size() == 2,
+            "reader host renders after handled control");
+    require(renderer.rendered.back().playing,
+            "reader host rendered playing model");
+
+    clock.monotonic = 300;
+    require(host.tick(), "reader host routes playback tick");
+    require(renderer.rendered.size() == 3,
+            "reader host renders after handled tick");
+    require(renderer.rendered.back().frame_position == 2,
+            "reader host tick advanced frame");
+
+    clock.monotonic = 500;
+    clock.state_timestamp = 20;
+    require(host.dispatch_lifecycle(LifecycleSignal::sleep),
+            "reader host routes lifecycle event");
+    require(renderer.rendered.back().mode == ReaderVisualMode::sleep,
+            "reader host renders sleep model");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 } // namespace
 
 int main() {
@@ -1356,6 +1432,7 @@ int main() {
     test_reader_view_model_modes_and_progress();
     test_reader_view_model_context_rejoins_split_words();
     test_kode_dot_reader_app_scaffold_routes_runtime();
+    test_kode_dot_reader_host_routes_clock_and_renderer();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
