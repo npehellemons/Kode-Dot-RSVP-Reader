@@ -47,6 +47,14 @@ target_include_directories(rsvp_lifecycle PUBLIC
 )
 target_link_libraries(rsvp_lifecycle PUBLIC rsvp_playback rsvp_storage)
 
+add_library(rsvp_controller
+    components/controller/src/reader_controller.cpp
+)
+target_include_directories(rsvp_controller PUBLIC
+    components/controller/include
+)
+target_link_libraries(rsvp_controller PUBLIC rsvp_playback)
+
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
 )
@@ -62,6 +70,6 @@ if(BUILD_TESTING)
     add_executable(rsvp_core_tests
         tests/core_tests.cpp
     )
-    target_link_libraries(rsvp_core_tests PRIVATE rsvp_lifecycle rsvp_library)
+    target_link_libraries(rsvp_core_tests PRIVATE rsvp_lifecycle rsvp_library rsvp_controller)
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
 endif()

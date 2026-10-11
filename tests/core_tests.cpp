@@ -1,3 +1,4 @@
+#include "rsvp/controller/reader_controller.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
 #include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
@@ -59,6 +60,9 @@ using rsvp::text::orp_index_for_codepoints;
 using rsvp::text::has_flag;
 using rsvp::text::tokenize;
 using rsvp::text::utf8_codepoint_count;
+using rsvp::controller::ReaderController;
+using rsvp::controller::ReaderDisplayMode;
+using rsvp::controller::ReaderInput;
 
 int failures = 0;
 
@@ -825,6 +829,97 @@ void test_lifecycle_bookmark_resolution_falls_back_to_source_identity() {
             "bookmark resolves by source byte offset as final fallback");
 }
 
+void test_reader_controller_red_sleep_wake_and_pause_sequence() {
+    ReaderController controller(make_display_frames(tokenize("one two three")),
+                                {},
+                                PlaybackSettings{.wpm = 300});
+
+    require(controller.view().mode == ReaderDisplayMode::title,
+            "controller starts on title card");
+    require(controller.playback().snapshot().state == PlaybackState::idle,
+            "controller playback starts idle");
+
+    require(controller.handle_input(ReaderInput::red, 0),
+            "red leaves title and starts playback");
+    require(controller.view().mode == ReaderDisplayMode::rsvp,
+            "red enters RSVP mode");
+    require(controller.playback().snapshot().state == PlaybackState::playing,
+            "red starts playback");
+
+    require(controller.tick(200), "controller playback advances before sleep");
+    require(controller.playback().snapshot().frame_index == 1,
+            "controller advanced to second word");
+
+    require(controller.handle_input(ReaderInput::red, 210),
+            "red pauses while awake");
+    require(controller.playback().snapshot().state == PlaybackState::paused,
+            "controller pauses while awake");
+
+    require(controller.handle_input(ReaderInput::sleep, 300),
+            "sleep input enters sleep mode");
+    require(controller.view().mode == ReaderDisplayMode::sleep,
+            "controller shows sleep mode");
+    require(!controller.tick(5000), "sleep mode does not advance");
+    require(controller.playback().snapshot().frame_index == 1,
+            "sleep keeps the current frame");
+
+    require(controller.handle_input(ReaderInput::red, 6000),
+            "red wakes from sleep");
+    require(controller.view().mode == ReaderDisplayMode::title,
+            "red wake returns to title card");
+    require(controller.playback().snapshot().state == PlaybackState::paused,
+            "red wake does not resume playback");
+
+    require(controller.handle_input(ReaderInput::red, 6100),
+            "second red resumes from title card");
+    require(controller.view().mode == ReaderDisplayMode::rsvp,
+            "second red returns to RSVP mode");
+    require(controller.playback().snapshot().state == PlaybackState::playing,
+            "second red resumes playback");
+    require(!controller.tick(6299), "resume is scheduled from wake interaction");
+    require(controller.playback().snapshot().frame_index == 1,
+            "resume does not catch up skipped sleep time");
+
+    require(controller.handle_input(ReaderInput::red, 6300),
+            "third red pauses after wake/resume");
+    require(controller.playback().snapshot().state == PlaybackState::paused,
+            "red remains usable for pause after wake/resume");
+}
+
+void test_reader_controller_dpad_navigation_and_context_mode() {
+    ReaderController controller(make_display_frames(tokenize("one two three four")),
+                                {},
+                                PlaybackSettings{.wpm = 250});
+
+    controller.handle_input(ReaderInput::red, 0);
+    controller.handle_input(ReaderInput::dpad_right, 10);
+    require(controller.playback().snapshot().state == PlaybackState::paused,
+            "dpad right pauses playback");
+    require(controller.playback().snapshot().frame_index == 1,
+            "dpad right advances one word");
+    require(controller.view().mode == ReaderDisplayMode::rsvp,
+            "short dpad right keeps RSVP mode");
+
+    controller.handle_input(ReaderInput::hold_right, 20);
+    require(controller.view().mode == ReaderDisplayMode::context,
+            "holding dpad enters context mode");
+    require(controller.playback().snapshot().frame_index == 2,
+            "holding dpad steps while entering context");
+
+    controller.handle_input(ReaderInput::hold_end, 30);
+    require(controller.view().mode == ReaderDisplayMode::rsvp,
+            "releasing dpad exits context mode");
+    require(controller.playback().snapshot().state == PlaybackState::paused,
+            "context release keeps playback paused");
+
+    controller.handle_input(ReaderInput::dpad_up, 40);
+    require(controller.playback().snapshot().wpm == 275,
+            "dpad up increases WPM by 25");
+    controller.handle_input(ReaderInput::dpad_down, 50);
+    require(controller.playback().snapshot().wpm == 250,
+            "dpad down decreases WPM by 25");
+}
+
 } // namespace
 
 int main() {
@@ -858,6 +953,8 @@ int main() {
     test_bookmark_serialization_hash_and_atomic_load();
     test_lifecycle_sleep_pauses_persists_and_does_not_advance();
     test_lifecycle_bookmark_resolution_falls_back_to_source_identity();
+    test_reader_controller_red_sleep_wake_and_pause_sequence();
+    test_reader_controller_dpad_navigation_and_context_mode();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
