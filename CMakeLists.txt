@@ -65,6 +65,11 @@ add_executable(rsvp_frame_dump
 )
 target_link_libraries(rsvp_frame_dump PRIVATE rsvp_library rsvp_playback)
 
+add_executable(rsvp_controller_trace
+    tools/rsvp_controller_trace.cpp
+)
+target_link_libraries(rsvp_controller_trace PRIVATE rsvp_controller)
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(rsvp_core_tests
@@ -72,4 +77,5 @@ if(BUILD_TESTING)
     )
     target_link_libraries(rsvp_core_tests PRIVATE rsvp_lifecycle rsvp_library rsvp_controller)
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
+    add_test(NAME rsvp_controller_trace COMMAND rsvp_controller_trace)
 endif()
