@@ -122,5 +122,12 @@ if(BUILD_TESTING)
                 --controller-trace $<TARGET_FILE:rsvp_controller_trace>
                 --frame-dump $<TARGET_FILE:rsvp_frame_dump>
         )
+        add_test(
+            NAME device_sim_view_model_trace
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_device_sim_view_model_trace.py
+                --view-model-trace $<TARGET_FILE:rsvp_view_model_trace>
+                --frame-dump $<TARGET_FILE:rsvp_frame_dump>
+        )
     endif()
 endif()

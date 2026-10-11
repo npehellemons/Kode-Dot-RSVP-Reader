@@ -107,7 +107,7 @@ std::vector<TraceScenario> scenarios() {
 
 ReaderController make_controller() {
     constexpr std::string_view kText =
-        "One two three. Four five six. Seven eight nine.";
+        "One supercalifragilistic! Three four five.";
     return ReaderController(make_display_frames(tokenize(kText)),
                             {},
                             PlaybackSettings{.wpm = 250});
@@ -142,6 +142,8 @@ void write_view_model(std::ostream& out,
     out << "          \"frame_position\": " << model.frame_position << ",\n";
     out << "          \"frame_total\": " << model.frame_total << ",\n";
     out << "          \"progress_percent\": " << model.progress_percent << ",\n";
+    out << "          \"orp_codepoint_index\": " << model.orp_codepoint_index << ",\n";
+    out << "          \"font_scale_percent\": " << model.font_scale_percent << ",\n";
     out << "          \"wpm\": " << model.wpm << ",\n";
     out << "          \"remaining_seconds\": " << model.remaining_seconds << ",\n";
     out << "          \"chapter_remaining_seconds\": " << model.chapter_remaining_seconds << ",\n";
@@ -198,7 +200,7 @@ int main() {
     std::cout << "{\n";
     std::cout << "  \"schema\": \"rsvp-view-model-trace-v1\",\n";
     std::cout << "  \"controller_schema\": \"rsvp-reader-controller-v1\",\n";
-    std::cout << "  \"fixture_text\": \"One two three. Four five six. Seven eight nine.\",\n";
+    std::cout << "  \"fixture_text\": \"One supercalifragilistic! Three four five.\",\n";
     std::cout << "  \"traces\": [\n";
     for (std::size_t index = 0; index < all_scenarios.size(); ++index) {
         write_scenario(std::cout, all_scenarios[index], index + 1 == all_scenarios.size());

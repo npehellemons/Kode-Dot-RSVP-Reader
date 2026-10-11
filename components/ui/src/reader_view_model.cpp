@@ -24,7 +24,7 @@ std::uint64_t ceil_ms_to_seconds(std::uint64_t ms) {
     return (ms + 999U) / 1000U;
 }
 
-std::string context_word_text(const rsvp::text::DisplayFrame& frame) {
+std::string context_chunk_text(const rsvp::text::DisplayFrame& frame) {
     auto text = frame.text_utf8;
     if (frame.continuation_after && !text.empty() && text.back() == '-') {
         text.pop_back();
@@ -48,6 +48,10 @@ ReaderViewModel make_reader_view_model(const rsvp::controller::ReaderView& view)
     model.frame_position = state.frame_count == 0 ? std::size_t{0} : state.frame_index + 1;
     model.frame_total = state.frame_count;
     model.wpm = state.wpm;
+    if (state.visible_frame) {
+        model.orp_codepoint_index = state.visible_frame->orp_codepoint_index;
+        model.font_scale_percent = state.visible_frame->font_scale_percent;
+    }
     model.remaining_seconds = ceil_ms_to_seconds(state.estimated_remaining_ms);
     model.chapter_remaining_seconds = ceil_ms_to_seconds(state.estimated_chapter_remaining_ms);
     model.playing = state.state == rsvp::playback::PlaybackState::playing;
@@ -78,12 +82,15 @@ ReaderViewModel make_reader_view_model(const rsvp::controller::ReaderView& view)
         {
             std::size_t last_source_token = static_cast<std::size_t>(-1);
             for (const auto& frame : view.context_frames) {
-                if (frame.source_token_index == last_source_token) {
+                const auto text = context_chunk_text(frame);
+                if (frame.source_token_index == last_source_token &&
+                    !model.context_words.empty()) {
+                    model.context_words.back().text += text;
                     continue;
                 }
                 last_source_token = frame.source_token_index;
                 model.context_words.push_back(
-                    {context_word_text(frame),
+                    {text,
                      frame.source_token_index == view.context.current_source_token_index});
             }
         }

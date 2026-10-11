@@ -58,6 +58,8 @@ using rsvp::text::DisplayFrameOptions;
 using rsvp::text::Chapter;
 using rsvp::text::PunctuationFlags;
 using rsvp::text::centered_index_for_codepoints;
+using rsvp::text::duration_percent_for_codepoints;
+using rsvp::text::font_scale_percent_for_codepoints;
 using rsvp::text::make_chapters_from_markdown_headings;
 using rsvp::text::make_display_frames;
 using rsvp::text::orp_index_for_codepoints;
@@ -229,7 +231,7 @@ void test_wpm_bounds_and_punctuation_durations() {
 
     require(engine.duration_for_index(0) == 225, "comma duration is 1.5x rounded up");
     require(engine.duration_for_index(1) == 300, "sentence duration is 2x");
-    require(engine.duration_for_index(2) == 150, "plain duration is base");
+    require(engine.duration_for_index(2) == 128, "short word duration is gently reduced");
 
     require(!engine.set_wpm(50), "low wpm rejected");
     require(engine.settings().wpm == PlaybackEngine::kMinWpm, "low wpm clamps to min");
@@ -238,6 +240,29 @@ void test_wpm_bounds_and_punctuation_durations() {
 
     engine.set_punctuation_pause_mode(PunctuationPauseMode::off);
     require(engine.duration_for_index(0) == 100, "punctuation off uses base duration");
+}
+
+void test_word_length_timing_and_font_scale_contract() {
+    DisplayFrameOptions options;
+    options.max_codepoints_per_frame = 16;
+    options.unscaled_codepoints_per_frame = 10;
+    options.min_font_scale_percent = 78;
+
+    require(duration_percent_for_codepoints(2, false, false) == 85,
+            "short words get shorter timing");
+    require(duration_percent_for_codepoints(7, false, false) == 110,
+            "medium-long words get extra timing");
+    require(duration_percent_for_codepoints(14, false, false) == 135,
+            "large unsplit words get long timing");
+    require(duration_percent_for_codepoints(14, true, false) == 150,
+            "split continuation chunks get long timing");
+
+    require(font_scale_percent_for_codepoints(10, options) == 100,
+            "words inside unscaled range keep full font size");
+    require(font_scale_percent_for_codepoints(16, options) == 78,
+            "words at max frame width use minimum readable scale");
+    require(font_scale_percent_for_codepoints(99, options) == 78,
+            "font scale clamps at minimum");
 }
 
 void test_display_frame_orp_indexes() {
@@ -260,9 +285,13 @@ void test_display_frames_without_chunking() {
     require(frames[0].text_utf8 == "a", "single-letter frame text");
     require(frames[0].orp_codepoint_index == 0, "single-letter frame ORP");
     require(frames[1].text_utf8 == "rapid", "rapid frame text");
+    require(frames[1].codepoint_count == 5, "rapid frame codepoint count");
+    require(frames[1].duration_percent == 100, "rapid frame base timing");
+    require(frames[1].font_scale_percent == 100, "rapid frame full font scale");
     require(frames[1].orp_codepoint_index == 1, "rapid frame ORP");
     require(!frames[1].centered_fallback, "normal frame not centered fallback");
     require(frames[2].text_utf8 == "testing", "testing frame text");
+    require(frames[2].duration_percent == 110, "testing frame length timing");
     require(frames[2].orp_codepoint_index == 2, "testing frame ORP");
 }
 
@@ -272,27 +301,29 @@ void test_display_frames_chunk_long_tokens() {
 
     const auto frames = make_display_frames(tokenize("supercalifragilistic!"), options);
     require(frames.size() == 3, "long token chunk count");
-    require(frames[0].text_utf8 == "supercal-", "first chunk has continuation marker");
+    require(frames[0].text_utf8 == "superca-", "first chunk has continuation marker");
     require(frames[0].source_byte_start == 0, "first chunk source byte start");
-    require(frames[0].source_byte_length == 8, "first chunk source byte length");
+    require(frames[0].source_byte_length == 7, "first chunk source byte length");
     require(frames[0].chunk_index == 0, "first chunk index");
     require(frames[0].chunk_count == 3, "first chunk count");
     require(frames[0].continuation_after, "first chunk continues after");
     require(!frames[0].continuation_before, "first chunk no continuation before");
     require(frames[0].centered_fallback, "first chunk uses centered fallback");
-    require(frames[0].orp_codepoint_index == 4, "first chunk centered ORP index");
+    require(frames[0].codepoint_count == 8, "first chunk codepoint count includes marker");
+    require(frames[0].duration_percent == 150, "first chunk length timing");
+    require(frames[0].orp_codepoint_index == 3, "first chunk centered ORP index");
     require(!has_flag(frames[0].punctuation_flags, PunctuationFlags::sentence_end),
             "first chunk does not carry sentence punctuation");
 
-    require(frames[1].text_utf8 == "ifragili-", "second chunk text");
-    require(frames[1].source_byte_start == 8, "second chunk source byte start");
-    require(frames[1].source_byte_length == 8, "second chunk source byte length");
+    require(frames[1].text_utf8 == "lifragi-", "second chunk text");
+    require(frames[1].source_byte_start == 7, "second chunk source byte start");
+    require(frames[1].source_byte_length == 7, "second chunk source byte length");
     require(frames[1].continuation_before, "second chunk continuation before");
     require(frames[1].continuation_after, "second chunk continuation after");
 
-    require(frames[2].text_utf8 == "stic!", "final chunk text");
-    require(frames[2].source_byte_start == 16, "final chunk source byte start");
-    require(frames[2].source_byte_length == 5, "final chunk source byte length");
+    require(frames[2].text_utf8 == "listic!", "final chunk text");
+    require(frames[2].source_byte_start == 14, "final chunk source byte start");
+    require(frames[2].source_byte_length == 7, "final chunk source byte length");
     require(frames[2].continuation_before, "final chunk continuation before");
     require(!frames[2].continuation_after, "final chunk does not continue after");
     require(has_flag(frames[2].punctuation_flags, PunctuationFlags::sentence_end),
@@ -304,15 +335,18 @@ void test_display_frames_preserve_utf8_boundaries() {
     options.max_codepoints_per_frame = 3;
     const auto frames = make_display_frames(tokenize("éclair"), options);
 
-    require(frames.size() == 2, "utf8 chunk count");
-    require(frames[0].text_utf8 == "\xC3\xA9" "cl-", "utf8 first chunk text");
+    require(frames.size() == 3, "utf8 chunk count");
+    require(frames[0].text_utf8 == "\xC3\xA9" "c-", "utf8 first chunk text");
     require(frames[0].source_byte_start == 0, "utf8 first chunk source start");
-    require(frames[0].source_byte_length == 4, "utf8 first chunk source length");
-    require(utf8_codepoint_count(frames[0].text_utf8) == 4,
+    require(frames[0].source_byte_length == 3, "utf8 first chunk source length");
+    require(utf8_codepoint_count(frames[0].text_utf8) == 3,
             "utf8 first chunk display codepoint count includes marker");
-    require(frames[1].text_utf8 == "air", "utf8 final chunk text");
-    require(frames[1].source_byte_start == 4, "utf8 final chunk source start");
-    require(frames[1].source_byte_length == 3, "utf8 final chunk source length");
+    require(frames[1].text_utf8 == "la-", "utf8 middle chunk text");
+    require(frames[1].source_byte_start == 3, "utf8 middle chunk source start");
+    require(frames[1].source_byte_length == 2, "utf8 middle chunk source length");
+    require(frames[2].text_utf8 == "ir", "utf8 final chunk text");
+    require(frames[2].source_byte_start == 5, "utf8 final chunk source start");
+    require(frames[2].source_byte_length == 2, "utf8 final chunk source length");
 }
 
 void test_chapters_from_markdown_headings() {
@@ -476,9 +510,9 @@ void test_playback_advances_by_display_frame() {
     require(engine.snapshot().frame_count == 4, "playback frame count includes chunks");
     require(engine.snapshot().token_count == 4, "legacy token count mirrors frame count");
     require(engine.snapshot().visible_frame.has_value(), "initial visible frame exists");
-    require(engine.snapshot().visible_frame->text_utf8 == "supercal-",
+    require(engine.snapshot().visible_frame->text_utf8 == "superca-",
             "initial visible frame text");
-    require(engine.snapshot().visible_token->text_utf8 == "supercal-",
+    require(engine.snapshot().visible_token->text_utf8 == "superca-",
             "legacy visible token mirrors frame text");
     require(engine.snapshot().source_token_index == 0, "initial source token index");
     require(engine.snapshot().chunk_index == 0, "initial chunk index");
@@ -487,21 +521,21 @@ void test_playback_advances_by_display_frame() {
             "chunked frame uses centered fallback");
 
     engine.start(0);
-    require(engine.tick(200), "first frame tick advances");
+    require(engine.tick(300), "first frame tick advances");
     require(engine.snapshot().frame_index == 1, "playback frame index advances");
-    require(engine.snapshot().visible_frame->text_utf8 == "ifragili-",
+    require(engine.snapshot().visible_frame->text_utf8 == "lifragi-",
             "second chunk visible");
     require(engine.snapshot().source_token_index == 0, "second chunk source token index");
     require(engine.snapshot().chunk_index == 1, "second chunk index");
 
-    require(engine.tick(400), "second frame tick advances");
-    require(engine.snapshot().visible_frame->text_utf8 == "stic!",
+    require(engine.tick(600), "second frame tick advances");
+    require(engine.snapshot().visible_frame->text_utf8 == "listic!",
             "final chunk visible");
     require(has_flag(engine.snapshot().visible_frame->punctuation_flags,
                      PunctuationFlags::sentence_end),
             "final chunk carries punctuation in playback");
 
-    require(engine.duration_for_index(2) == 400, "final sentence chunk duration");
+    require(engine.duration_for_index(2) == 600, "final sentence chunk duration");
     require(engine.duration_for_index(3) == 200, "plain next token duration");
 
     engine.advance_one(400);
@@ -573,7 +607,7 @@ void test_playback_word_navigation_pauses_and_skips_chunks() {
             "advance word reaches next source token");
     require(engine.snapshot().chunk_index == 0,
             "advance word lands on first chunk");
-    require(engine.snapshot().visible_frame->text_utf8 == "supercal-",
+    require(engine.snapshot().visible_frame->text_utf8 == "superca-",
             "advance word skips to long word first chunk");
 
     engine.advance_one(0);
@@ -1210,6 +1244,31 @@ void test_reader_view_model_modes_and_progress() {
     require(sleep.primary_text == "Screen sleeping", "view model sleep text");
 }
 
+void test_reader_view_model_context_rejoins_split_words() {
+    DisplayFrameOptions options;
+    options.max_codepoints_per_frame = 8;
+    ReaderController controller(
+        make_display_frames(tokenize("one supercalifragilistic! three"), options),
+        {},
+        PlaybackSettings{.wpm = 300});
+
+    controller.handle_input(ReaderInput::hold_right, 10);
+    auto context = make_reader_view_model(controller.view());
+
+    require(context.mode == ReaderVisualMode::context,
+            "split-word view model context mode");
+    require(context.context_words.size() == 3,
+            "split-word context rejoins source words");
+    require(context.context_words[0].text == "one",
+            "split-word context previous word");
+    require(context.context_words[1].text == "supercalifragilistic!",
+            "split-word context full long word");
+    require(context.context_words[1].current,
+            "split-word context current full word");
+    require(context.context_words[2].text == "three",
+            "split-word context next word");
+}
+
 } // namespace
 
 int main() {
@@ -1222,6 +1281,7 @@ int main() {
     test_playback_overslept_tick_only_advances_once();
     test_seek_rewind_advance_and_finish();
     test_wpm_bounds_and_punctuation_durations();
+    test_word_length_timing_and_font_scale_contract();
     test_display_frame_orp_indexes();
     test_display_frames_without_chunking();
     test_display_frames_chunk_long_tokens();
@@ -1252,6 +1312,7 @@ int main() {
     test_reader_runtime_persists_control_events_and_restores();
     test_reader_runtime_lifecycle_sleep_persists();
     test_reader_view_model_modes_and_progress();
+    test_reader_view_model_context_rejoins_split_words();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";

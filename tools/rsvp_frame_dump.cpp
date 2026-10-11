@@ -239,7 +239,10 @@ int main(int argc, char* argv[]) {
         std::cout << "      \"chunk_count\": " << frame.chunk_count << ",\n";
         std::cout << "      \"source_byte_start\": " << frame.source_byte_start << ",\n";
         std::cout << "      \"source_byte_length\": " << frame.source_byte_length << ",\n";
+        std::cout << "      \"codepoint_count\": " << frame.codepoint_count << ",\n";
         std::cout << "      \"orp_codepoint_index\": " << frame.orp_codepoint_index << ",\n";
+        std::cout << "      \"duration_percent\": " << frame.duration_percent << ",\n";
+        std::cout << "      \"font_scale_percent\": " << frame.font_scale_percent << ",\n";
         const auto context = playback.sentence_context_for_frame(index);
         const auto navigation = playback.navigation_for_frame(index);
         std::cout << "      \"duration_ms\": "

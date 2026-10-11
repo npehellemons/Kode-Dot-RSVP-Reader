@@ -208,6 +208,7 @@
 
     .reader-area.center-fallback .word {
       color: var(--text);
+      left: 50%;
     }
 
     .word .orp {
@@ -253,7 +254,15 @@
       display: -webkit-box;
       -webkit-line-clamp: 7;
       -webkit-box-orient: vertical;
+      width: 100%;
       overflow: hidden;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .context-word {
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .context-word.is-current {
@@ -786,44 +795,91 @@
       return `${minutes}:${String(remainder).padStart(2, "0")}`;
     }
 
-    function render() {
+    function visualMode() {
+      if (state.sleeping) return "sleep";
+      if (state.contextView) return "context";
+      if (state.titleCard) return "title";
+      return "rsvp";
+    }
+
+    function makeViewModel() {
       const current = frameData.frames[state.index];
-      const currentText = current ? current.text : "";
       const chapter = currentChapter();
       const allChapters = chapters();
       const chapterNumber = Math.max(1, allChapters.indexOf(chapter) + 1);
       const chapterFrameIndex = Math.max(0, state.index - chapter.first_frame_index);
-      const chapterFrameCount = Math.max(1, chapter.frame_count);
+      const chapterFrameCount = Math.max(0, chapter.frame_count);
+      const mode = visualMode();
+      const progressPercent = chapterFrameCount <= 1
+        ? (chapterFrameCount === 0 ? 0 : 100)
+        : Math.floor((chapterFrameIndex / (chapterFrameCount - 1)) * 100);
+      const bounds = current ? contextWindowBounds() : { start: 0, end: 0 };
+      const currentSourceToken = current ? current.source_token_index : -1;
+
+      let primaryText = current ? current.text : "";
+      if (mode === "sleep") {
+        primaryText = "Screen sleeping";
+      } else if (mode === "title") {
+        primaryText = chapter.title || "Document";
+      } else if (mode === "context") {
+        primaryText = "Sentence context";
+      }
+
+      return {
+        mode,
+        primaryText,
+        contextWords: mode === "context"
+          ? contextWordsForBounds(bounds, currentSourceToken)
+          : [],
+        chapterTitle: chapter.title || "",
+        chapterIndex: chapterNumber,
+        chapterCount: allChapters.length,
+        chapterPosition: chapterFrameCount === 0 ? 0 : chapterFrameIndex + 1,
+        chapterTotal: chapterFrameCount,
+        framePosition: frameData.frames.length === 0 ? 0 : state.index + 1,
+        frameTotal: frameData.frames.length,
+        progressPercent: Math.max(0, Math.min(100, progressPercent)),
+        orpCodepointIndex: current ? current.orp_codepoint_index : 0,
+        fontScalePercent: current && Number.isInteger(current.font_scale_percent)
+          ? current.font_scale_percent
+          : 100,
+        wpm: state.wpm,
+        chapterRemainingSeconds: Math.ceil(chapterRemainingMs(chapter) / 1000),
+        playing: state.playing,
+        paused: !state.playing && !state.sleeping,
+        finished: false,
+        currentFrame: current || null
+      };
+    }
+
+    function render() {
+      const model = makeViewModel();
       readerArea.classList.remove("needs-chunking", "center-fallback", "title-card", "context-view");
-      chapterIndex.textContent = `Ch ${chapterNumber}/${allChapters.length}`;
-      position.textContent = `${Math.min(chapterFrameIndex + 1, chapterFrameCount)}/${chapterFrameCount}`;
-      const pct = chapterFrameCount <= 1
-        ? 100
-        : Math.round((chapterFrameIndex / (chapterFrameCount - 1)) * 100);
-      progressFill.style.width = `${pct}%`;
-      progress.setAttribute("aria-valuenow", String(pct));
-      document.querySelector('[data-action="toggle"].round-button').textContent = state.playing ? "Ⅱ" : "▶";
-      wpm.textContent = `${state.wpm} WPM`;
-      const remainingSeconds = Math.ceil(chapterRemainingMs(chapter) / 1000);
-      remaining.textContent = formatDuration(remainingSeconds);
+      chapterIndex.textContent = `Ch ${model.chapterIndex}/${model.chapterCount}`;
+      position.textContent = `${Math.min(model.chapterPosition, model.chapterTotal)}/${model.chapterTotal}`;
+      progressFill.style.width = `${model.progressPercent}%`;
+      progress.setAttribute("aria-valuenow", String(model.progressPercent));
+      document.querySelector('[data-action="toggle"].round-button').textContent = model.playing ? "Ⅱ" : "▶";
+      wpm.textContent = `${model.wpm} WPM`;
+      remaining.textContent = formatDuration(model.chapterRemainingSeconds);
 
-      if (state.titleCard) {
-        renderChapterTitle(chapter.title || "Frame data unavailable");
+      if (model.mode === "title" || model.mode === "sleep") {
+        renderChapterTitle(model.primaryText);
         screen.classList.toggle("is-sleeping", state.sleeping);
         return;
       }
 
-      if (state.contextView) {
-        renderContextView();
+      if (model.mode === "context") {
+        renderContextView(model);
         screen.classList.toggle("is-sleeping", state.sleeping);
         return;
       }
 
-      renderWord(currentText, current ? current.orp_codepoint_index : 0);
-      if (current && current.centered_fallback) {
+      renderWord(model.primaryText, model.orpCodepointIndex);
+      if (model.currentFrame && model.currentFrame.centered_fallback) {
         readerArea.classList.add("center-fallback");
       }
-      fitWordToScreen(current);
+      fitWordToScreen(model.currentFrame, model.fontScalePercent);
       screen.classList.toggle("is-sleeping", state.sleeping);
     }
 
@@ -876,7 +932,13 @@
           Number.isInteger(frame.chunk_count) &&
             Number.isInteger(frame.source_byte_start) &&
             Number.isInteger(frame.source_byte_length) &&
+            (frame.codepoint_count === undefined ||
+              Number.isInteger(frame.codepoint_count)) &&
             Number.isInteger(frame.orp_codepoint_index) &&
+            (frame.duration_percent === undefined ||
+              Number.isInteger(frame.duration_percent)) &&
+            (frame.font_scale_percent === undefined ||
+              Number.isInteger(frame.font_scale_percent)) &&
             (frame.duration_ms === undefined ||
               Number.isInteger(frame.duration_ms)) &&
             (frame.previous_word_frame_index === undefined ||
@@ -1042,6 +1104,26 @@
       return frame.text.replace(/-$/, "");
     }
 
+    function contextWordsForBounds(bounds, currentSourceToken) {
+      const words = [];
+      let lastSourceToken = -1;
+      for (let index = bounds.start; index <= bounds.end; index += 1) {
+        const frame = frameData.frames[index];
+        if (!frame) continue;
+        const text = frameTextForContext(frame);
+        if (frame.source_token_index === lastSourceToken && words.length > 0) {
+          words[words.length - 1].text += text;
+          continue;
+        }
+        lastSourceToken = frame.source_token_index;
+        words.push({
+          text,
+          current: frame.source_token_index === currentSourceToken
+        });
+      }
+      return words;
+    }
+
     function contextWindowBounds() {
       const current = frameData.frames[state.index];
       if (current &&
@@ -1084,10 +1166,7 @@
       word.textContent = title;
     }
 
-    function renderContextView() {
-      const current = frameData.frames[state.index];
-      const currentSourceToken = current ? current.source_token_index : -1;
-      const bounds = contextWindowBounds();
+    function renderContextView(model) {
       readerArea.classList.add("context-view");
       word.innerHTML = "";
       word.style.removeProperty("--word-size");
@@ -1095,19 +1174,13 @@
 
       const lines = document.createElement("div");
       lines.className = "context-lines";
-      let lastSourceToken = -1;
-      for (let index = bounds.start; index <= bounds.end; index += 1) {
-        const frame = frameData.frames[index];
-        if (!frame || frame.source_token_index === lastSourceToken) {
-          continue;
-        }
-        lastSourceToken = frame.source_token_index;
+      for (const contextWord of model.contextWords) {
         const span = document.createElement("span");
         span.className = "context-word";
-        if (frame.source_token_index === currentSourceToken) {
+        if (contextWord.current) {
           span.classList.add("is-current");
         }
-        span.textContent = frameTextForContext(frame);
+        span.textContent = contextWord.text;
         lines.appendChild(span);
         lines.appendChild(document.createTextNode(" "));
       }
@@ -1127,17 +1200,26 @@
     function fitsReaderArea() {
       const wordRect = word.getBoundingClientRect();
       const areaRect = readerArea.getBoundingClientRect();
-      return wordRect.left >= areaRect.left + 4 && wordRect.right <= areaRect.right - 4;
+      const style = window.getComputedStyle(readerArea);
+      const paddingLeft = parseFloat(style.paddingLeft) || 0;
+      const paddingRight = parseFloat(style.paddingRight) || 0;
+      const safeInset = 6;
+      return wordRect.left >= areaRect.left + paddingLeft + safeInset &&
+        wordRect.right <= areaRect.right - paddingRight - safeInset;
     }
 
     function centerWord() {
       word.style.transform = "translateX(-50%)";
     }
 
-    function fitWordToScreen(frame) {
+    function fitWordToScreen(frame, fontScalePercent = 100) {
       if (!frame) return;
       const current = frame.text;
-      for (let size = baseWordSize; size >= minWordSize; size -= 2) {
+      const preferredScale = Number.isInteger(fontScalePercent)
+        ? Math.max(50, Math.min(100, fontScalePercent))
+        : 100;
+      const preferredSize = Math.round((baseWordSize * preferredScale) / 100);
+      for (let size = preferredSize; size >= minWordSize; size -= 2) {
         word.style.setProperty("--word-size", `${size}px`);
         if (frame.centered_fallback) {
           centerWord();

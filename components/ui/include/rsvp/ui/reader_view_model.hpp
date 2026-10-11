@@ -33,6 +33,8 @@ struct ReaderViewModel {
     std::size_t frame_position = 0;
     std::size_t frame_total = 0;
     int progress_percent = 0;
+    std::size_t orp_codepoint_index = 0;
+    int font_scale_percent = 100;
     int wpm = 250;
     std::uint64_t remaining_seconds = 0;
     std::uint64_t chapter_remaining_seconds = 0;

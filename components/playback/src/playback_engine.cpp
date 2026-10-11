@@ -206,7 +206,10 @@ std::uint64_t PlaybackEngine::duration_for_index(std::size_t frame_index) const 
         return base_duration_ms();
     }
 
-    const auto base = base_duration_ms();
+    const auto base = ceil_div(base_duration_ms() *
+                                   static_cast<std::uint64_t>(
+                                       std::max(1, frames_[frame_index].duration_percent)),
+                               100);
     if (settings_.punctuation_pause_mode == PunctuationPauseMode::off) {
         return base;
     }
