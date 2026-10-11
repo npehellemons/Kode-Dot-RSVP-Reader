@@ -1,5 +1,6 @@
 #include "rsvp/controller/reader_controller.hpp"
 #include "kode_dot/reader_app.hpp"
+#include "kode_dot/reader_boot.hpp"
 #include "kode_dot/reader_host.hpp"
 #include "kode_dot/reader_input.hpp"
 #include "kode_dot/reader_lifecycle.hpp"
@@ -98,10 +99,13 @@ using kode_dot::ReaderRenderer;
 using kode_dot::ReaderScreenFrame;
 using kode_dot::ReaderScreenMode;
 using kode_dot::DirectoryReaderStorageProvider;
+using kode_dot::ReaderHostBoot;
 using kode_dot::control_event_from_native;
 using kode_dot::format_screen_duration;
 using kode_dot::lifecycle_event_from_native;
 using kode_dot::make_reader_screen_frame;
+using kode_dot::make_reader_app_boot;
+using kode_dot::make_reader_host;
 using kode_dot::reader_state_paths_for_directory;
 
 int failures = 0;
@@ -1505,6 +1509,48 @@ void test_kode_dot_storage_path_contract() {
             "storage provider bookmark path");
 }
 
+void test_kode_dot_reader_boot_composes_host() {
+    const auto dir = temp_test_dir("kode-dot-reader-boot");
+    const auto frames = make_display_frames(tokenize("one two three"));
+    DirectoryReaderStorageProvider storage(dir);
+    ReaderHostBoot boot;
+    boot.document = DocumentIdentity{"boot-doc", content_hash("one two three")};
+    boot.fallback_settings = PlaybackSettings{.wpm = 325};
+
+    const auto app_boot = make_reader_app_boot(storage, boot);
+    require(app_boot.state_paths.settings_path == dir / "settings.txt",
+            "reader boot settings path");
+    require(app_boot.state_paths.bookmark_path == dir / "bookmark.txt",
+            "reader boot bookmark path");
+    require(app_boot.document.doc_id == "boot-doc",
+            "reader boot document id");
+    require(app_boot.fallback_settings.wpm == 325,
+            "reader boot fallback settings");
+
+    FakeReaderClock clock;
+    clock.monotonic = 77;
+    clock.state_timestamp = 88;
+    FakeReaderRenderer renderer;
+    auto host = make_reader_host(frames, {}, boot, storage, clock, renderer);
+
+    host.render();
+    require(renderer.rendered.size() == 1,
+            "reader boot host initial render");
+    require(renderer.rendered.back().mode == ReaderScreenMode::title,
+            "reader boot host title mode");
+    require(renderer.rendered.back().wpm_label == "325 WPM",
+            "reader boot host fallback WPM");
+
+    clock.monotonic = 80;
+    require(host.dispatch_control(PhysicalControl::red_button, ControlPhase::release),
+            "reader boot host routes control");
+    require(renderer.rendered.back().playing,
+            "reader boot host rendered playing");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 void test_kode_dot_reader_host_routes_clock_and_renderer() {
     const auto dir = temp_test_dir("kode-dot-reader-host");
     const auto frames = make_display_frames(tokenize("one two three"));
@@ -1607,6 +1653,7 @@ int main() {
     test_kode_dot_native_input_contract();
     test_kode_dot_native_lifecycle_contract();
     test_kode_dot_storage_path_contract();
+    test_kode_dot_reader_boot_composes_host();
     test_kode_dot_reader_host_routes_clock_and_renderer();
 
     if (failures != 0) {
