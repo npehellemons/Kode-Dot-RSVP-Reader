@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Python3 COMPONENTS Interpreter)
+
 add_library(rsvp_text
     components/text/src/chapter.cpp
     components/text/src/display_frame.cpp
@@ -78,4 +80,13 @@ if(BUILD_TESTING)
     target_link_libraries(rsvp_core_tests PRIVATE rsvp_lifecycle rsvp_library rsvp_controller)
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
     add_test(NAME rsvp_controller_trace COMMAND rsvp_controller_trace)
+    if(Python3_FOUND)
+        add_test(
+            NAME device_sim_controller_trace
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_device_sim_controller_trace.py
+                --controller-trace $<TARGET_FILE:rsvp_controller_trace>
+                --frame-dump $<TARGET_FILE:rsvp_frame_dump>
+        )
+    endif()
 endif()
