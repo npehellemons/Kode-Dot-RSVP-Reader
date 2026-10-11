@@ -28,6 +28,7 @@ using rsvp::lifecycle::bookmark_matches_document;
 using rsvp::lifecycle::capture_reader_state;
 using rsvp::lifecycle::pause_and_persist_for_sleep;
 using rsvp::lifecycle::resolve_bookmark_frame;
+using rsvp::lifecycle::restore_reader_controller;
 using rsvp::lifecycle::to_playback_settings;
 using rsvp::library::ChapterSource;
 using rsvp::library::DocumentFormat;
@@ -829,6 +830,85 @@ void test_lifecycle_bookmark_resolution_falls_back_to_source_identity() {
             "bookmark resolves by source byte offset as final fallback");
 }
 
+void test_controller_lifecycle_sleep_persists_and_restores_paused() {
+    const std::string source = "one two three four";
+    const auto frames = make_display_frames(tokenize(source));
+    const DocumentIdentity document{"controller-sleep-fixture", content_hash(source)};
+    const auto dir = temp_test_dir("controller-sleep");
+    const ReaderStatePaths paths{dir / "settings.state", dir / "bookmark.state"};
+
+    ReaderController controller(frames, {}, PlaybackSettings{.wpm = 300});
+    controller.handle_input(ReaderInput::dpad_up, 0);
+    controller.handle_input(ReaderInput::red, 10);
+    require(controller.tick(210), "controller lifecycle advances before sleep");
+    require(controller.playback().snapshot().frame_index == 1,
+            "controller lifecycle reaches second frame");
+    require(controller.playback().snapshot().wpm == 325,
+            "controller lifecycle changed WPM before sleep");
+
+    require(pause_and_persist_for_sleep(controller, paths, document, 9000),
+            "controller lifecycle sleep persists");
+    require(controller.view().mode == ReaderDisplayMode::sleep,
+            "controller lifecycle enters sleep mode");
+    require(controller.playback().snapshot().state == PlaybackState::paused,
+            "controller lifecycle sleep pauses playback");
+    require(!controller.tick(20000),
+            "controller lifecycle sleeping tick does not advance");
+
+    auto restored = restore_reader_controller(frames, {}, paths, document, {}, 30000);
+    require(restored.view().mode == ReaderDisplayMode::title,
+            "controller lifecycle restore wakes to title mode");
+    require(restored.playback().snapshot().state == PlaybackState::paused,
+            "controller lifecycle restore is paused");
+    require(restored.playback().snapshot().frame_index == 1,
+            "controller lifecycle restore keeps frame");
+    require(restored.playback().snapshot().visible_frame->text_utf8 == "two",
+            "controller lifecycle restore keeps visible word");
+    require(restored.playback().snapshot().wpm == 325,
+            "controller lifecycle restore keeps WPM");
+    require(!restored.tick(50000),
+            "controller lifecycle restore does not catch up old time");
+
+    restored.handle_input(ReaderInput::red, 50000);
+    require(restored.playback().snapshot().state == PlaybackState::playing,
+            "controller lifecycle restored red resumes");
+    require(!restored.tick(50184),
+            "controller lifecycle restored resume schedules from red press");
+    require(restored.tick(50185),
+            "controller lifecycle restored playback advances on new schedule");
+    require(restored.playback().snapshot().frame_index == 2,
+            "controller lifecycle restored playback advances to next frame");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
+void test_controller_restore_ignores_bookmark_for_different_document() {
+    const std::string source = "one two three";
+    const auto frames = make_display_frames(tokenize(source));
+    const DocumentIdentity saved_document{"saved-doc", content_hash(source)};
+    const DocumentIdentity other_document{"other-doc", content_hash(source)};
+    const auto dir = temp_test_dir("controller-restore-mismatch");
+    const ReaderStatePaths paths{dir / "settings.state", dir / "bookmark.state"};
+
+    ReaderController controller(frames, {}, PlaybackSettings{.wpm = 250});
+    controller.handle_input(ReaderInput::red, 0);
+    controller.tick(240);
+    require(pause_and_persist_for_sleep(controller, paths, saved_document, 77),
+            "controller mismatch fixture persists");
+
+    auto restored = restore_reader_controller(frames, {}, paths, other_document, {}, 1000);
+    require(restored.view().mode == ReaderDisplayMode::title,
+            "controller mismatch restore starts on title");
+    require(restored.playback().snapshot().state == PlaybackState::idle,
+            "controller mismatch restore stays idle without matching bookmark");
+    require(restored.playback().snapshot().frame_index == 0,
+            "controller mismatch restore ignores old bookmark frame");
+
+    std::error_code error;
+    std::filesystem::remove_all(dir, error);
+}
+
 void test_reader_controller_red_sleep_wake_and_pause_sequence() {
     ReaderController controller(make_display_frames(tokenize("one two three")),
                                 {},
@@ -953,6 +1033,8 @@ int main() {
     test_bookmark_serialization_hash_and_atomic_load();
     test_lifecycle_sleep_pauses_persists_and_does_not_advance();
     test_lifecycle_bookmark_resolution_falls_back_to_source_identity();
+    test_controller_lifecycle_sleep_persists_and_restores_paused();
+    test_controller_restore_ignores_bookmark_for_different_document();
     test_reader_controller_red_sleep_wake_and_pause_sequence();
     test_reader_controller_dpad_navigation_and_context_mode();
 

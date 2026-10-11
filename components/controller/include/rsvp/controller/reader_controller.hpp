@@ -2,6 +2,7 @@
 
 #include "rsvp/playback/playback_engine.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -44,6 +45,9 @@ public:
 
     bool handle_input(ReaderInput input, std::uint64_t monotonic_ms);
     bool tick(std::uint64_t monotonic_ms);
+    void restore_paused(std::size_t frame_index,
+                        std::uint64_t monotonic_ms,
+                        ReaderDisplayMode mode = ReaderDisplayMode::title);
 
 private:
     bool toggle_playback(std::uint64_t monotonic_ms);

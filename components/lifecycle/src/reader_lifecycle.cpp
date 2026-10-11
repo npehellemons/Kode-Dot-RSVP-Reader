@@ -72,6 +72,16 @@ CapturedReaderState capture_reader_state(
             bookmark_from_display_state(document, state, updated_at)};
 }
 
+CapturedReaderState capture_reader_state(
+    const DocumentIdentity& document,
+    const rsvp::controller::ReaderController& controller,
+    std::uint64_t updated_at) {
+    return capture_reader_state(document,
+                                controller.playback().snapshot(),
+                                controller.playback().settings(),
+                                updated_at);
+}
+
 bool bookmark_matches_document(const rsvp::storage::BookmarkV1& bookmark,
                                const DocumentIdentity& document) {
     return bookmark.doc_id == document.doc_id &&
@@ -120,6 +130,36 @@ bool pause_and_persist_for_sleep(rsvp::playback::DisplayAdapter& adapter,
     return persist_reader_state(
         paths,
         capture_reader_state(document, adapter.snapshot(), adapter.settings(), updated_at));
+}
+
+bool pause_and_persist_for_sleep(rsvp::controller::ReaderController& controller,
+                                 const ReaderStatePaths& paths,
+                                 const DocumentIdentity& document,
+                                 std::uint64_t updated_at) {
+    controller.handle_input(rsvp::controller::ReaderInput::sleep, updated_at);
+    return persist_reader_state(paths, capture_reader_state(document, controller, updated_at));
+}
+
+rsvp::controller::ReaderController restore_reader_controller(
+    const std::vector<rsvp::text::DisplayFrame>& frames,
+    const std::vector<rsvp::text::Chapter>& chapters,
+    const ReaderStatePaths& paths,
+    const DocumentIdentity& document,
+    rsvp::playback::PlaybackSettings fallback_settings,
+    std::uint64_t monotonic_ms) {
+    const auto loaded_settings = rsvp::storage::load_settings(paths.settings_path);
+    auto controller = rsvp::controller::ReaderController(
+        frames,
+        chapters,
+        loaded_settings ? to_playback_settings(*loaded_settings) : fallback_settings);
+
+    const auto loaded_bookmark = rsvp::storage::load_bookmark(paths.bookmark_path);
+    if (loaded_bookmark && bookmark_matches_document(*loaded_bookmark, document)) {
+        controller.restore_paused(resolve_bookmark_frame(*loaded_bookmark, frames),
+                                  monotonic_ms,
+                                  rsvp::controller::ReaderDisplayMode::title);
+    }
+    return controller;
 }
 
 } // namespace rsvp::lifecycle

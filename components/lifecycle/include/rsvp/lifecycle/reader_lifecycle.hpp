@@ -1,8 +1,10 @@
 #pragma once
 
+#include "rsvp/controller/reader_controller.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
+#include "rsvp/text/chapter.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -42,6 +44,11 @@ CapturedReaderState capture_reader_state(
     const rsvp::playback::PlaybackSettings& playback_settings,
     std::uint64_t updated_at);
 
+CapturedReaderState capture_reader_state(
+    const DocumentIdentity& document,
+    const rsvp::controller::ReaderController& controller,
+    std::uint64_t updated_at);
+
 bool bookmark_matches_document(const rsvp::storage::BookmarkV1& bookmark,
                                const DocumentIdentity& document);
 
@@ -56,5 +63,18 @@ bool pause_and_persist_for_sleep(rsvp::playback::DisplayAdapter& adapter,
                                  const ReaderStatePaths& paths,
                                  const DocumentIdentity& document,
                                  std::uint64_t updated_at);
+
+bool pause_and_persist_for_sleep(rsvp::controller::ReaderController& controller,
+                                 const ReaderStatePaths& paths,
+                                 const DocumentIdentity& document,
+                                 std::uint64_t updated_at);
+
+rsvp::controller::ReaderController restore_reader_controller(
+    const std::vector<rsvp::text::DisplayFrame>& frames,
+    const std::vector<rsvp::text::Chapter>& chapters,
+    const ReaderStatePaths& paths,
+    const DocumentIdentity& document,
+    rsvp::playback::PlaybackSettings fallback_settings = {},
+    std::uint64_t monotonic_ms = 0);
 
 } // namespace rsvp::lifecycle

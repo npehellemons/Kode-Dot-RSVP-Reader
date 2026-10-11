@@ -84,6 +84,15 @@ bool ReaderController::tick(std::uint64_t monotonic_ms) {
     return playback_.tick(monotonic_ms);
 }
 
+void ReaderController::restore_paused(std::size_t frame_index,
+                                      std::uint64_t monotonic_ms,
+                                      ReaderDisplayMode mode) {
+    playback_.seek(frame_index, monotonic_ms);
+    playback_.resume(monotonic_ms);
+    playback_.pause();
+    mode_ = mode == ReaderDisplayMode::sleep ? ReaderDisplayMode::title : mode;
+}
+
 bool ReaderController::toggle_playback(std::uint64_t monotonic_ms) {
     show_rsvp();
 

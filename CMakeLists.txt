@@ -41,14 +41,6 @@ target_include_directories(rsvp_storage PUBLIC
     components/storage/include
 )
 
-add_library(rsvp_lifecycle
-    components/lifecycle/src/reader_lifecycle.cpp
-)
-target_include_directories(rsvp_lifecycle PUBLIC
-    components/lifecycle/include
-)
-target_link_libraries(rsvp_lifecycle PUBLIC rsvp_playback rsvp_storage)
-
 add_library(rsvp_controller
     components/controller/src/reader_controller.cpp
 )
@@ -56,6 +48,14 @@ target_include_directories(rsvp_controller PUBLIC
     components/controller/include
 )
 target_link_libraries(rsvp_controller PUBLIC rsvp_playback)
+
+add_library(rsvp_lifecycle
+    components/lifecycle/src/reader_lifecycle.cpp
+)
+target_include_directories(rsvp_lifecycle PUBLIC
+    components/lifecycle/include
+)
+target_link_libraries(rsvp_lifecycle PUBLIC rsvp_controller rsvp_playback rsvp_storage)
 
 add_executable(rsvp_host_preview
     apps/host-sim/src/main.cpp
