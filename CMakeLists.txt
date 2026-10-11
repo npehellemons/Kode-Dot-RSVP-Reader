@@ -101,6 +101,11 @@ add_executable(rsvp_host_preview
 )
 target_link_libraries(rsvp_host_preview PRIVATE rsvp_library rsvp_runtime rsvp_ui)
 
+add_executable(kode_dot_smoke
+    apps/kode-dot/src/smoke_main.cpp
+)
+target_link_libraries(kode_dot_smoke PRIVATE kode_dot_app)
+
 add_executable(rsvp_frame_dump
     tools/rsvp_frame_dump.cpp
 )
@@ -128,6 +133,7 @@ if(BUILD_TESTING)
         rsvp_ui
     )
     add_test(NAME rsvp_core_tests COMMAND rsvp_core_tests)
+    add_test(NAME kode_dot_smoke COMMAND kode_dot_smoke)
     add_test(NAME rsvp_controller_trace COMMAND rsvp_controller_trace)
     add_test(NAME rsvp_view_model_trace COMMAND rsvp_view_model_trace)
     if(Python3_FOUND)
