@@ -27,6 +27,7 @@ target_include_directories(rsvp_playback PUBLIC
 target_link_libraries(rsvp_playback PUBLIC rsvp_text)
 
 add_library(rsvp_library
+    components/library/src/book_catalog.cpp
     components/library/src/document_text.cpp
 )
 target_include_directories(rsvp_library PUBLIC
@@ -74,12 +75,13 @@ target_include_directories(rsvp_runtime PUBLIC
 target_link_libraries(rsvp_runtime PUBLIC rsvp_lifecycle rsvp_platform)
 
 add_library(rsvp_ui
+    components/ui/src/menu_model.cpp
     components/ui/src/reader_view_model.cpp
 )
 target_include_directories(rsvp_ui PUBLIC
     components/ui/include
 )
-target_link_libraries(rsvp_ui PUBLIC rsvp_controller)
+target_link_libraries(rsvp_ui PUBLIC rsvp_controller rsvp_library rsvp_storage)
 
 add_library(kode_dot_app
     apps/kode-dot/src/reader_app.cpp

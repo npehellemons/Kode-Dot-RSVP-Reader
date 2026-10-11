@@ -8,6 +8,7 @@
 #include "kode_dot/reader_screen.hpp"
 #include "kode_dot/reader_storage.hpp"
 #include "rsvp/lifecycle/reader_lifecycle.hpp"
+#include "rsvp/library/book_catalog.hpp"
 #include "rsvp/library/document_text.hpp"
 #include "rsvp/playback/display_adapter.hpp"
 #include "rsvp/playback/playback_engine.hpp"
@@ -16,6 +17,7 @@
 #include "rsvp/storage/state_store.hpp"
 #include "rsvp/text/display_frame.hpp"
 #include "rsvp/text/tokenizer.hpp"
+#include "rsvp/ui/menu_model.hpp"
 #include "rsvp/ui/reader_view_model.hpp"
 
 #include <cstdlib>
@@ -42,11 +44,19 @@ using rsvp::lifecycle::resolve_bookmark_frame;
 using rsvp::lifecycle::restore_reader_controller;
 using rsvp::lifecycle::to_playback_settings;
 using rsvp::library::ChapterSource;
+using rsvp::library::LibraryCatalog;
+using rsvp::library::books_in_folder;
+using rsvp::library::chapter_index_for_frame;
 using rsvp::library::DocumentFormat;
 using rsvp::library::MetadataConfidence;
 using rsvp::library::TxtImportOptions;
+using rsvp::library::folder_names;
 using rsvp::library::import_txt_document;
+using rsvp::library::make_book_id;
+using rsvp::library::make_book_record;
 using rsvp::library::make_frame_chapters;
+using rsvp::library::update_resume_position;
+using rsvp::library::upsert_book;
 using rsvp::storage::BookmarkV1;
 using rsvp::storage::FixationMode;
 using rsvp::storage::PunctuationMode;
@@ -86,7 +96,10 @@ using rsvp::platform::reader_input_for_control_event;
 using rsvp::platform::reader_input_for_lifecycle_event;
 using rsvp::runtime::ReaderRuntime;
 using rsvp::ui::ReaderVisualMode;
+using rsvp::ui::SettingsMenuItem;
+using rsvp::ui::make_main_menu_model;
 using rsvp::ui::make_reader_view_model;
+using rsvp::ui::make_settings_menu_model;
 using kode_dot::ReaderApp;
 using kode_dot::ReaderAppBoot;
 using kode_dot::ReaderClock;
@@ -530,6 +543,65 @@ void test_txt_import_hides_skipped_front_matter() {
     require(chapters.size() == 2, "txt import front matter chapter count");
     require(chapters[0].first_frame_index == 0,
             "txt import first chapter starts at first readable frame");
+}
+
+void test_book_catalog_records_resume_and_folders() {
+    const std::string source =
+        "Title: Example Book\n"
+        "Author: Example Writer\n\n"
+        "# One\n"
+        "Alpha beta.\n\n"
+        "# Two\n"
+        "Gamma delta.";
+    const auto document = import_txt_document(source, "/books/Example Writer - Example Book.txt");
+    const auto frames = make_display_frames(tokenize(document.reading_text_utf8));
+    const auto chapters = make_frame_chapters(document, frames);
+    const auto hash = content_hash(document.reading_text_utf8);
+
+    const auto id = make_book_id(document, hash);
+    require(id.find("example-writer-example-book-") == 0,
+            "book catalog id uses author title hash");
+
+    auto book = make_book_record(
+        document,
+        frames,
+        chapters,
+        hash,
+        "/books/Example Writer - Example Book.txt",
+        "Detective");
+    require(book.id == id, "book catalog record default id");
+    require(book.title == "Example Book", "book catalog record title");
+    require(book.author == "Example Writer", "book catalog record author");
+    require(book.format == DocumentFormat::txt, "book catalog record format");
+    require(book.chapter_count == 2, "book catalog chapter count");
+    require(book.frame_count == frames.size(), "book catalog frame count");
+    require(book.resume_chapter_index == 0, "book catalog initial chapter index");
+
+    require(chapter_index_for_frame(chapters, chapters[1].first_frame_index) == 1,
+            "book catalog chapter lookup by frame");
+    update_resume_position(book, frames.size() + 50, chapters);
+    require(book.resume_frame_index == frames.size() - 1,
+            "book catalog resume clamps to final frame");
+    require(book.resume_chapter_index == 1,
+            "book catalog resume chapter updates");
+
+    LibraryCatalog catalog;
+    upsert_book(catalog, book);
+    require(catalog.books.size() == 1, "book catalog inserts book");
+    auto updated = book;
+    updated.title = "Updated Example";
+    upsert_book(catalog, updated);
+    require(catalog.books.size() == 1, "book catalog upsert replaces book");
+    require(catalog.books[0].title == "Updated Example",
+            "book catalog upsert keeps latest record");
+
+    const auto folders = folder_names(catalog);
+    require(folders.size() == 1 && folders[0] == "Detective",
+            "book catalog folder names");
+    const auto detective_books = books_in_folder(catalog, "Detective");
+    require(detective_books.size() == 1 &&
+                detective_books[0]->id == catalog.books[0].id,
+            "book catalog books in folder");
 }
 
 void test_playback_advances_by_display_frame() {
@@ -1300,6 +1372,53 @@ void test_reader_view_model_context_rejoins_split_words() {
             "split-word context next word");
 }
 
+void test_menu_models_use_library_and_settings_state() {
+    const auto document = import_txt_document(
+        "Title: Menu Book\nAuthor: Tester\n\nOne two three.",
+        "Tester - Menu Book.txt");
+    const auto frames = make_display_frames(tokenize(document.reading_text_utf8));
+    const auto chapters = make_frame_chapters(document, frames);
+    LibraryCatalog catalog;
+    upsert_book(
+        catalog,
+        make_book_record(document,
+                         frames,
+                         chapters,
+                         content_hash(document.reading_text_utf8),
+                         "Tester - Menu Book.txt",
+                         "Samples"));
+
+    const auto main_menu =
+        make_main_menu_model(catalog, &catalog.books[0], true, 99);
+    require(main_menu.entries.size() == 4, "main menu entry count");
+    require(main_menu.selected_index == 3, "main menu selection clamps");
+    require(main_menu.entries[0].label == "Library", "main menu library label");
+    require(main_menu.entries[0].value == "1 books", "main menu library count");
+    require(main_menu.entries[1].value == "Menu Book",
+            "main menu current book title");
+    require(main_menu.entries[3].value == "Storage ready",
+            "main menu storage status");
+
+    SettingsV1 settings;
+    settings.wpm = 375;
+    settings.font_scale = 90;
+    settings.fixation_mode = FixationMode::orp;
+    settings.punctuation_mode = PunctuationMode::off;
+    const auto settings_menu = make_settings_menu_model(settings, 2);
+    require(settings_menu.entries.size() == 4, "settings menu entry count");
+    require(settings_menu.selected_index == 2, "settings menu selected row");
+    require(settings_menu.entries[0].item == SettingsMenuItem::wpm,
+            "settings menu speed item");
+    require(settings_menu.entries[0].value == "375 WPM",
+            "settings menu speed value");
+    require(settings_menu.entries[1].value == "90%",
+            "settings menu font value");
+    require(settings_menu.entries[2].value == "ORP",
+            "settings menu fixation value");
+    require(settings_menu.entries[3].value == "Off",
+            "settings menu punctuation value");
+}
+
 void test_kode_dot_reader_app_scaffold_routes_runtime() {
     const auto dir = temp_test_dir("kode-dot-app-scaffold");
     const auto frames = make_display_frames(tokenize("one two three"));
@@ -1704,6 +1823,7 @@ int main() {
     test_txt_import_auto_chunks_long_plain_text();
     test_document_text_frame_chapter_mapping();
     test_txt_import_hides_skipped_front_matter();
+    test_book_catalog_records_resume_and_folders();
     test_playback_advances_by_display_frame();
     test_playback_exposes_chapter_progress_and_remaining_time();
     test_playback_word_navigation_pauses_and_skips_chunks();
@@ -1724,6 +1844,7 @@ int main() {
     test_reader_runtime_lifecycle_sleep_persists();
     test_reader_view_model_modes_and_progress();
     test_reader_view_model_context_rejoins_split_words();
+    test_menu_models_use_library_and_settings_state();
     test_kode_dot_reader_app_scaffold_routes_runtime();
     test_kode_dot_reader_screen_frame_contract();
     test_kode_dot_native_input_contract();
